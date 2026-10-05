@@ -1,0 +1,1662 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tactical Strike 2D</title>
+  <meta name="description" content="Top-down tactical 2D shooter featuring offline AI bot combat, dynamic line-of-sight fog of war, modular weapon mechanics, and realistic recoil ballistics." />
+  <meta property="og:title" content="Tactical Strike 2D" />
+  <meta property="og:description" content="Top-down tactical 2D shooter featuring offline AI bot combat, dynamic line-of-sight fog of war, modular weapon mechanics, and realistic recoil ballistics." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <style>
+    /* =========================================================================
+       RESET & BASE LAYOUT
+       ========================================================================= */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #080c14;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+      color: #e2e8f0;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #080c14;
+      overflow: hidden;
+    }
+    canvas#gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+      display: block;
+    }
+
+    /* =========================================================================
+       HEADS-UP DISPLAY (HUD)
+       ========================================================================= */
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 16px 20px;
+      z-index: 10;
+    }
+    .hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .hud-header-left {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .badge {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+    }
+    .badge span.val {
+      color: #38bdf8;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .hud-controls-hint {
+      font-size: 11px;
+      color: #64748b;
+      letter-spacing: 0.3px;
+      background: rgba(15, 23, 42, 0.65);
+      padding: 4px 10px;
+      border-radius: 4px;
+      width: fit-content;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .hud-top-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .radar-container {
+      width: 140px;
+      height: 140px;
+      background: rgba(10, 16, 26, 0.9);
+      border: 1.5px solid rgba(56, 189, 248, 0.4);
+      border-radius: 50%;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), inset 0 0 15px rgba(56, 189, 248, 0.15);
+      pointer-events: auto;
+    }
+    canvas#radarCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .radar-tag {
+      position: absolute;
+      top: 6px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: rgba(56, 189, 248, 0.7);
+      text-transform: uppercase;
+    }
+
+    .hud-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+    }
+    .hud-panel {
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      backdrop-filter: blur(10px);
+      border-radius: 8px;
+      padding: 12px 18px;
+      min-width: 220px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+      pointer-events: auto;
+    }
+    .health-bar-bg {
+      width: 100%;
+      height: 12px;
+      background: #1e293b;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .health-bar-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #ef4444, #10b981);
+      transition: width 0.15s ease-out, background 0.3s;
+    }
+    .hud-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+      font-weight: 700;
+    }
+    .hud-value-large {
+      font-size: 24px;
+      font-weight: 800;
+      color: #f8fafc;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+    .hud-center-tools {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+    .tool-btn {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #cbd5e1;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .tool-btn:hover {
+      background: rgba(30, 41, 59, 0.95);
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    .tool-btn.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    .weapon-selector {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .weapon-tag {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(30, 41, 59, 0.6);
+      color: #94a3b8;
+      pointer-events: auto;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .weapon-tag:hover {
+      border-color: #7dd3fc;
+      color: #f1f5f9;
+    }
+    .weapon-tag.active {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.25);
+      color: #38bdf8;
+    }
+
+    /* =========================================================================
+       ROUND OVERLAYS (WON / LOST / PAUSE)
+       ========================================================================= */
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(4, 8, 16, 0.88);
+      backdrop-filter: blur(12px);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      text-align: center;
+      padding: 24px;
+    }
+    .overlay.active {
+      display: flex;
+    }
+    .overlay h1 {
+      font-size: 42px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    .overlay.won h1 {
+      color: #34d399;
+      text-shadow: 0 0 30px rgba(52, 211, 153, 0.4);
+    }
+    .overlay.lost h1 {
+      color: #f87171;
+      text-shadow: 0 0 30px rgba(248, 113, 113, 0.4);
+    }
+    .overlay p {
+      font-size: 16px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+      max-width: 460px;
+      line-height: 1.5;
+    }
+    .btn-restart {
+      background: #38bdf8;
+      color: #0f172a;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      border: none;
+      padding: 14px 36px;
+      border-radius: 6px;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(56, 189, 248, 0.4);
+      transition: transform 0.1s, background-color 0.15s;
+    }
+    .btn-restart:hover {
+      background: #7dd3fc;
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <!-- Main Full-Screen Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD Overlay -->
+    <div id="hud">
+      <div class="hud-top">
+        <div class="hud-header-left">
+          <div class="badge">TACTICAL 2D // <span class="val">SECTOR COMBAT</span></div>
+          <div class="badge">HOSTILES ACTIVE: <span id="hud-bots-count" class="val">0</span></div>
+          <div class="hud-controls-hint">WASD: Move • Aim: Mouse • Shoot: Click • [R]: Reload • [1-3]: Weapons • [F]: Fog • [C]: Center Cam</div>
+        </div>
+
+        <div class="hud-top-right">
+          <!-- Tactical Radar Scanner -->
+          <div class="radar-container" title="Tactical Sector Radar">
+            <div class="radar-tag">RADAR SCANNER</div>
+            <canvas id="radarCanvas" width="140" height="140"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-bottom">
+        <!-- Operative Health Panel -->
+        <div class="hud-panel">
+          <div class="hud-label">Operative Vitals</div>
+          <div class="hud-value-large"><span id="hud-health-num">100</span><span style="font-size: 14px; color: #64748b;">/ 100 HP</span></div>
+          <div class="health-bar-bg">
+            <div id="hud-health-bar" class="health-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Center View Tools -->
+        <div class="hud-center-tools">
+          <button id="btn-fog" class="tool-btn active" onclick="window.toggleFogOfWar()">
+            <span>Fog of War:</span> <strong id="fog-status">ON</strong> [F]
+          </button>
+          <button class="tool-btn" onclick="window.resetCamera()">
+            <span>Reset View</span> [C]
+          </button>
+        </div>
+
+        <!-- Weapon & Ammo Panel -->
+        <div class="hud-panel" style="text-align: right;">
+          <div class="hud-label">Equipped Arsenal</div>
+          <div id="hud-weapon-name" class="hud-value-large" style="justify-content: flex-end;">Pistol</div>
+          <div class="hud-value-large" style="font-size: 20px; justify-content: flex-end; margin-top: 2px;">
+            <span id="hud-ammo-cur" style="color: #38bdf8;">12</span>
+            <span style="font-size: 14px; color: #64748b;">/</span>
+            <span id="hud-ammo-max" style="font-size: 14px; color: #64748b;">12</span>
+            <span id="hud-reload-status" style="font-size: 11px; color: #f59e0b; margin-left: 6px; display: none;">RELOADING...</span>
+          </div>
+          <div class="weapon-selector" style="justify-content: flex-end;">
+            <div id="tag-Pistol" class="weapon-tag active" onclick="window.selectWeapon('Pistol')">[1] Pistol</div>
+            <div id="tag-Rifle" class="weapon-tag" onclick="window.selectWeapon('Rifle')">[2] Rifle</div>
+            <div id="tag-Sniper" class="weapon-tag" onclick="window.selectWeapon('Sniper')">[3] Sniper</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Round Result Overlay -->
+    <div id="round-overlay" class="overlay">
+      <h1 id="overlay-title">ROUND WON</h1>
+      <p id="overlay-subtitle">All hostiles eliminated. Tactical zone secured.</p>
+      <button id="overlay-button" class="btn-restart" onclick="window.restartGame()">DEPLOY NEXT ROUND</button>
+    </div>
+  </div>
+
+  <!-- Game Engine Script -->
+  <script>
+    /* =========================================================================
+       GAME CONFIGURATION BLOCK (Easily customized for maps, weapons, and bots)
+       ========================================================================= */
+    const GameConfig = {
+      // Tile Grid Map: 0 = floor, 1 = solid wall, 2 = player spawn, 3 = bot spawn
+      // Designed with wide tactical corridors, rooms, and flanking routes
+      levelMap: [
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 3, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 3, 0, 1],
+        [1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 3, 0, 0, 1],
+        [1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 1, 1, 0, 0, 3, 0, 1],
+        [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 3, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+      ],
+
+      tileSize: 52, // Dimensions of each map cell in world pixels
+
+      // Weapon Definitions: damage, fireRate (ms), recoilSpread (degrees), bulletSpeed, magSize, reloadTime (ms)
+      weapons: {
+        Pistol: {
+          name: 'Pistol',
+          damage: 28,
+          fireRate: 260,
+          recoilSpread: 3.0,
+          maxRecoil: 9,
+          bulletSpeed: 820,
+          magSize: 12,
+          reloadTime: 1200,
+          automatic: false
+        },
+        Rifle: {
+          name: 'Rifle',
+          damage: 35,
+          fireRate: 110,
+          recoilSpread: 5.5,
+          maxRecoil: 18,
+          bulletSpeed: 980,
+          magSize: 30,
+          reloadTime: 1900,
+          automatic: true
+        },
+        Sniper: {
+          name: 'Sniper',
+          damage: 100,
+          fireRate: 900,
+          recoilSpread: 1.2,
+          maxRecoil: 25,
+          bulletSpeed: 1450,
+          magSize: 5,
+          reloadTime: 2400,
+          automatic: false
+        }
+      },
+
+      botCount: 5, // Total enemy AI bots spawned
+      playerSpeed: 195, // Player movement speed in world pixels/sec
+      botSpeed: 120, // Bot movement speed
+      fogOfWarEnabled: true, // Fog of war (can be toggled in real-time)
+      cameraZoom: 1.15 // Default tactical view zoom factor
+    };
+
+    /* =========================================================================
+       AUDIO SYNTHESIZER (Web Audio API - Crisp Tactical Sound Effects)
+       ========================================================================= */
+    const SoundFx = {
+      ctx: null,
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) this.ctx = new AudioContext();
+        }
+      },
+      playShot(weaponType) {
+        if (!this.ctx) return;
+        try {
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          if (weaponType === 'Sniper') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(160, now);
+            osc.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+            gain.gain.setValueAtTime(0.35, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.3);
+          } else if (weaponType === 'Rifle') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(240, now);
+            osc.frequency.exponentialRampToValueAtTime(45, now + 0.12);
+            gain.gain.setValueAtTime(0.24, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.12);
+          } else {
+            // Pistol
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(320, now);
+            osc.frequency.exponentialRampToValueAtTime(70, now + 0.1);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.1);
+          }
+        } catch (e) {}
+      },
+      playHit() {
+        if (!this.ctx) return;
+        try {
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(100, now);
+          osc.frequency.exponentialRampToValueAtTime(20, now + 0.08);
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.08);
+        } catch (e) {}
+      }
+    };
+
+    /* =========================================================================
+       TACTICAL 2D GAME ENGINE (With Adaptive Camera & Fixed Visibility)
+       ========================================================================= */
+    class TacticalShooterGame {
+      constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+
+        // Radar Canvas
+        this.radarCanvas = document.getElementById('radarCanvas');
+        this.radarCtx = this.radarCanvas.getContext('2d');
+
+        this.map = GameConfig.levelMap;
+        this.tileSize = GameConfig.tileSize;
+        this.rows = this.map.length;
+        this.cols = this.map[0].length;
+        this.worldWidth = this.cols * this.tileSize;
+        this.worldHeight = this.rows * this.tileSize;
+
+        // Dedicated Offscreen Buffer for Fog of War
+        // (CRITICAL FIX: Renders fog over world without erasing scene pixels)
+        this.fogCanvas = document.createElement('canvas');
+        this.fogCanvas.width = this.worldWidth;
+        this.fogCanvas.height = this.worldHeight;
+        this.fogCtx = this.fogCanvas.getContext('2d');
+
+        // Adaptive Camera State
+        this.camera = {
+          x: this.worldWidth / 2,
+          y: this.worldHeight / 2,
+          zoom: GameConfig.cameraZoom,
+          targetZoom: GameConfig.cameraZoom
+        };
+
+        // Input state
+        this.keys = {};
+        this.mouse = {
+          screenX: 0,
+          screenY: 0,
+          worldX: 0,
+          worldY: 0,
+          isDown: false
+        };
+
+        // Entities & Systems
+        this.player = null;
+        this.bots = [];
+        this.bullets = [];
+        this.particles = [];
+        this.wallImpacts = [];
+
+        // Game loop state
+        this.isRunning = false;
+        this.isGameOver = false;
+        this.lastTime = performance.now();
+
+        // Cached spawn points
+        this.playerSpawn = { x: 100, y: 100 };
+        this.botSpawns = [];
+        this.parseLevelSpawns();
+
+        // Visibility ray polygon
+        this.fovPolygon = [];
+
+        this.setupWindowResize();
+        this.initInputListeners();
+        this.resetGame();
+      }
+
+      setupWindowResize() {
+        const resize = () => {
+          const dpr = window.devicePixelRatio || 1;
+          const rect = this.canvas.getBoundingClientRect();
+          this.canvas.width = rect.width * dpr;
+          this.canvas.height = rect.height * dpr;
+          this.ctx.resetTransform?.();
+        };
+        window.addEventListener('resize', resize);
+        // Initial sizing
+        resize();
+      }
+
+      parseLevelSpawns() {
+        this.botSpawns = [];
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const tile = this.map[r][c];
+            const cx = (c + 0.5) * this.tileSize;
+            const cy = (r + 0.5) * this.tileSize;
+            if (tile === 2) {
+              this.playerSpawn = { x: cx, y: cy };
+            } else if (tile === 3) {
+              this.botSpawns.push({ x: cx, y: cy });
+            }
+          }
+        }
+        if (this.botSpawns.length === 0) {
+          this.botSpawns.push({ x: this.worldWidth - 120, y: this.worldHeight - 120 });
+        }
+      }
+
+      initInputListeners() {
+        window.addEventListener('keydown', (e) => {
+          this.keys[e.key.toLowerCase()] = true;
+
+          // Quick weapon switching: 1, 2, 3
+          if (e.key === '1') this.switchPlayerWeapon('Pistol');
+          if (e.key === '2') this.switchPlayerWeapon('Rifle');
+          if (e.key === '3') this.switchPlayerWeapon('Sniper');
+
+          // Reload key: R
+          if (e.key.toLowerCase() === 'r') {
+            if (this.player) this.player.startReload();
+          }
+
+          // Toggle Fog of War: F
+          if (e.key.toLowerCase() === 'f') {
+            this.toggleFog();
+          }
+
+          // Reset Camera: C
+          if (e.key.toLowerCase() === 'c') {
+            this.resetCameraToPlayer();
+          }
+
+          SoundFx.init();
+        });
+
+        window.addEventListener('keyup', (e) => {
+          this.keys[e.key.toLowerCase()] = false;
+        });
+
+        this.canvas.addEventListener('mousemove', (e) => {
+          const rect = this.canvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          this.mouse.screenX = (e.clientX - rect.left) * dpr;
+          this.mouse.screenY = (e.clientY - rect.top) * dpr;
+          this.updateMouseWorldCoords();
+        });
+
+        this.canvas.addEventListener('mousedown', (e) => {
+          if (e.button === 0) {
+            this.mouse.isDown = true;
+            SoundFx.init();
+            if (this.player && !this.isGameOver) {
+              this.player.triggerFire();
+            }
+          }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+          if (e.button === 0) {
+            this.mouse.isDown = false;
+          }
+        });
+
+        // Global exposed handlers
+        window.selectWeapon = (key) => this.switchPlayerWeapon(key);
+        window.restartGame = () => this.resetGame();
+        window.toggleFogOfWar = () => this.toggleFog();
+        window.resetCamera = () => this.resetCameraToPlayer();
+      }
+
+      toggleFog() {
+        GameConfig.fogOfWarEnabled = !GameConfig.fogOfWarEnabled;
+        const btn = document.getElementById('btn-fog');
+        const status = document.getElementById('fog-status');
+        if (GameConfig.fogOfWarEnabled) {
+          btn.classList.add('active');
+          status.innerText = 'ON';
+        } else {
+          btn.classList.remove('active');
+          status.innerText = 'OFF';
+        }
+      }
+
+      resetCameraToPlayer() {
+        if (this.player) {
+          this.camera.x = this.player.x;
+          this.camera.y = this.player.y;
+        }
+      }
+
+      updateMouseWorldCoords() {
+        const cx = this.canvas.width / 2;
+        const cy = this.canvas.height / 2;
+        this.mouse.worldX = (this.mouse.screenX - cx) / this.camera.zoom + this.camera.x;
+        this.mouse.worldY = (this.mouse.screenY - cy) / this.camera.zoom + this.camera.y;
+      }
+
+      switchPlayerWeapon(weaponKey) {
+        if (!this.player || !GameConfig.weapons[weaponKey]) return;
+        this.player.equippedWeapon = weaponKey;
+        this.player.weaponStats = { ...GameConfig.weapons[weaponKey] };
+        this.player.currentAmmo = this.player.weaponStats.magSize;
+        this.player.isReloading = false;
+        this.updateHUD();
+      }
+
+      resetGame() {
+        document.getElementById('round-overlay').classList.remove('active');
+        this.isGameOver = false;
+
+        // Initialize Player
+        this.player = {
+          x: this.playerSpawn.x,
+          y: this.playerSpawn.y,
+          radius: 17,
+          hp: 100,
+          maxHp: 100,
+          angle: 0,
+          equippedWeapon: 'Pistol',
+          weaponStats: { ...GameConfig.weapons.Pistol },
+          currentAmmo: GameConfig.weapons.Pistol.magSize,
+          isReloading: false,
+          reloadTimer: 0,
+          lastShotTime: 0,
+          recoilAngle: 0,
+          startReload() {
+            if (this.isReloading || this.currentAmmo >= this.weaponStats.magSize) return;
+            this.isReloading = true;
+            this.reloadTimer = this.weaponStats.reloadTime;
+          },
+          triggerFire: () => {
+            this.tryPlayerShoot();
+          }
+        };
+
+        // Center camera instantly on player spawn
+        this.camera.x = this.player.x;
+        this.camera.y = this.player.y;
+
+        // Spawn Bots distributed across map
+        this.bots = [];
+        const botCount = Math.min(GameConfig.botCount, 12);
+        for (let i = 0; i < botCount; i++) {
+          const spawn = this.botSpawns[i % this.botSpawns.length];
+          const angleOffset = (i / botCount) * Math.PI * 2;
+          const spawnX = spawn.x + Math.cos(angleOffset) * 24;
+          const spawnY = spawn.y + Math.sin(angleOffset) * 24;
+          const botWeaponKey = i % 2 === 0 ? 'Rifle' : 'Pistol';
+
+          this.bots.push({
+            id: i + 1,
+            x: spawnX,
+            y: spawnY,
+            radius: 17,
+            hp: 85,
+            maxHp: 85,
+            angle: Math.random() * Math.PI * 2,
+            targetAngle: 0,
+            speed: GameConfig.botSpeed,
+            state: 'Patrol', // 'Patrol' | 'Chase' | 'Shoot'
+            stateTimer: 1 + Math.random() * 2,
+            patrolDir: { x: Math.cos(Math.random() * Math.PI * 2), y: Math.sin(Math.random() * Math.PI * 2) },
+            lastKnownPlayerPos: null,
+            weaponStats: { ...GameConfig.weapons[botWeaponKey] },
+            lastShotTime: 0,
+            shootInaccuracy: 0.12,
+            canSeePlayer: false
+          });
+        }
+
+        this.bullets = [];
+        this.particles = [];
+        this.wallImpacts = [];
+        this.isRunning = true;
+        this.lastTime = performance.now();
+
+        this.updateHUD();
+      }
+
+      /* =========================================================================
+         COLLISION DETECTION & KINEMATICS
+         ========================================================================= */
+      isSolidWall(worldX, worldY) {
+        const c = Math.floor(worldX / this.tileSize);
+        const r = Math.floor(worldY / this.tileSize);
+        if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) return true;
+        return this.map[r][c] === 1;
+      }
+
+      resolveEntityWallCollision(entity) {
+        const r = entity.radius;
+        const minCol = Math.floor((entity.x - r) / this.tileSize);
+        const maxCol = Math.floor((entity.x + r) / this.tileSize);
+        const minRow = Math.floor((entity.y - r) / this.tileSize);
+        const maxRow = Math.floor((entity.y + r) / this.tileSize);
+
+        for (let row = minRow; row <= maxRow; row++) {
+          for (let col = minCol; col <= maxCol; col++) {
+            if (row < 0 || row >= this.rows || col < 0 || col >= this.cols || this.map[row][col] === 1) {
+              const wallLeft = col * this.tileSize;
+              const wallRight = wallLeft + this.tileSize;
+              const wallTop = row * this.tileSize;
+              const wallBottom = wallTop + this.tileSize;
+
+              const closestX = Math.max(wallLeft, Math.min(entity.x, wallRight));
+              const closestY = Math.max(wallTop, Math.min(entity.y, wallBottom));
+
+              const dx = entity.x - closestX;
+              const dy = entity.y - closestY;
+              const distSq = dx * dx + dy * dy;
+
+              if (distSq < r * r && distSq > 0.0001) {
+                const dist = Math.sqrt(distSq);
+                const overlap = r - dist;
+                entity.x += (dx / dist) * overlap;
+                entity.y += (dy / dist) * overlap;
+              }
+            }
+          }
+        }
+      }
+
+      /* =========================================================================
+         RAYCASTING & LINE OF SIGHT
+         ========================================================================= */
+      hasLineOfSight(x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const steps = Math.ceil(dist / 14);
+        if (steps <= 1) return true;
+
+        const stepX = dx / steps;
+        const stepY = dy / steps;
+
+        // Check internal points along ray segment
+        for (let i = 1; i < steps; i++) {
+          const testX = x1 + stepX * i;
+          const testY = y1 + stepY * i;
+          if (this.isSolidWall(testX, testY)) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      castRay(originX, originY, angle, maxDist = 950) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        let dist = 0;
+        const step = 12;
+
+        while (dist < maxDist) {
+          dist += step;
+          const px = originX + cos * dist;
+          const py = originY + sin * dist;
+          if (this.isSolidWall(px, py)) {
+            // Binary refine for clean corner contacts
+            let low = dist - step;
+            let high = dist;
+            for (let b = 0; b < 3; b++) {
+              const mid = (low + high) * 0.5;
+              if (this.isSolidWall(originX + cos * mid, originY + sin * mid)) {
+                high = mid;
+              } else {
+                low = mid;
+              }
+            }
+            return { x: originX + cos * high, y: originY + sin * high };
+          }
+        }
+        return { x: originX + cos * maxDist, y: originY + sin * maxDist };
+      }
+
+      computeVisibilityPolygon() {
+        if (!this.player) return;
+        const points = [];
+        const numRays = 240; // High performance, crisp 360-degree field of view
+        const step = (Math.PI * 2) / numRays;
+
+        for (let a = 0; a < Math.PI * 2; a += step) {
+          const hit = this.castRay(this.player.x, this.player.y, a);
+          points.push(hit);
+        }
+        this.fovPolygon = points;
+      }
+
+      /* =========================================================================
+         BALLISTICS & SHOOTING
+         ========================================================================= */
+      tryPlayerShoot() {
+        if (!this.player || this.isGameOver || this.player.isReloading) return;
+        const now = performance.now();
+        const stats = this.player.weaponStats;
+
+        if (now - this.player.lastShotTime < stats.fireRate) return;
+
+        if (this.player.currentAmmo <= 0) {
+          this.player.startReload();
+          return;
+        }
+
+        this.player.lastShotTime = now;
+        this.player.currentAmmo--;
+
+        const maxSpreadRad = (stats.recoilSpread * Math.PI) / 180;
+        const currentRecoilRad = (this.player.recoilAngle * Math.PI) / 180;
+        const finalSpread = (Math.random() - 0.5) * (maxSpreadRad + currentRecoilRad);
+        const bulletAngle = this.player.angle + finalSpread;
+
+        this.player.recoilAngle = Math.min(this.player.recoilAngle + stats.recoilSpread * 0.8, stats.maxRecoil);
+
+        this.spawnBullet(this.player.x, this.player.y, bulletAngle, stats, true);
+        SoundFx.playShot(this.player.equippedWeapon);
+        this.spawnMuzzleFlash(this.player.x, this.player.y, this.player.angle);
+
+        this.updateHUD();
+
+        if (this.player.currentAmmo === 0) {
+          this.player.startReload();
+        }
+      }
+
+      tryBotShoot(bot) {
+        if (!this.player || this.isGameOver) return;
+        const now = performance.now();
+        const stats = bot.weaponStats;
+
+        if (now - bot.lastShotTime < stats.fireRate) return;
+
+        bot.lastShotTime = now;
+
+        const inaccuracy = (Math.random() - 0.5) * bot.shootInaccuracy;
+        const bulletAngle = bot.angle + inaccuracy;
+
+        this.spawnBullet(bot.x, bot.y, bulletAngle, stats, false);
+        SoundFx.playShot('Pistol');
+        this.spawnMuzzleFlash(bot.x, bot.y, bot.angle);
+      }
+
+      spawnBullet(x, y, angle, weaponStats, isPlayerBullet) {
+        const offset = 22;
+        this.bullets.push({
+          x: x + Math.cos(angle) * offset,
+          y: y + Math.sin(angle) * offset,
+          vx: Math.cos(angle) * weaponStats.bulletSpeed,
+          vy: Math.sin(angle) * weaponStats.bulletSpeed,
+          damage: weaponStats.damage,
+          isPlayerBullet: isPlayerBullet,
+          life: 2.0
+        });
+      }
+
+      spawnMuzzleFlash(x, y, angle) {
+        const muzzleX = x + Math.cos(angle) * 22;
+        const muzzleY = y + Math.sin(angle) * 22;
+        for (let i = 0; i < 5; i++) {
+          this.particles.push({
+            x: muzzleX,
+            y: muzzleY,
+            vx: Math.cos(angle + (Math.random() - 0.5) * 0.8) * (80 + Math.random() * 90),
+            vy: Math.sin(angle + (Math.random() - 0.5) * 0.8) * (80 + Math.random() * 90),
+            color: '#fef08a',
+            radius: 2.5,
+            alpha: 1,
+            life: 0.12
+          });
+        }
+      }
+
+      spawnHitSparks(x, y, color = '#f59e0b') {
+        for (let i = 0; i < 7; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const spd = 50 + Math.random() * 130;
+          this.particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(a) * spd,
+            vy: Math.sin(a) * spd,
+            color: color,
+            radius: 2,
+            alpha: 1,
+            life: 0.28
+          });
+        }
+      }
+
+      /* =========================================================================
+         AI BOTS SYSTEM (State Machine: Patrol, Chase, Shoot)
+         ========================================================================= */
+      updateBots(dt) {
+        if (!this.player) return;
+
+        for (const bot of this.bots) {
+          if (bot.hp <= 0) continue;
+
+          const distToPlayer = Math.hypot(this.player.x - bot.x, this.player.y - bot.y);
+          const hasSight = distToPlayer < 650 && this.hasLineOfSight(bot.x, bot.y, this.player.x, this.player.y);
+          bot.canSeePlayer = hasSight;
+
+          if (hasSight) {
+            bot.lastKnownPlayerPos = { x: this.player.x, y: this.player.y };
+          }
+
+          // State Machine
+          if (hasSight) {
+            if (distToPlayer <= 350) {
+              bot.state = 'Shoot';
+            } else {
+              bot.state = 'Chase';
+            }
+          } else if (bot.lastKnownPlayerPos) {
+            const distToLast = Math.hypot(bot.lastKnownPlayerPos.x - bot.x, bot.lastKnownPlayerPos.y - bot.y);
+            if (distToLast < 45) {
+              bot.lastKnownPlayerPos = null;
+              bot.state = 'Patrol';
+            } else {
+              bot.state = 'Chase';
+            }
+          } else {
+            bot.state = 'Patrol';
+          }
+
+          if (bot.state === 'Shoot') {
+            bot.targetAngle = Math.atan2(this.player.y - bot.y, this.player.x - bot.x);
+            bot.angle = this.smoothRotate(bot.angle, bot.targetAngle, 10 * dt);
+            this.tryBotShoot(bot);
+          } else if (bot.state === 'Chase') {
+            const dest = bot.lastKnownPlayerPos || this.player;
+            bot.targetAngle = Math.atan2(dest.y - bot.y, dest.x - bot.x);
+            bot.angle = this.smoothRotate(bot.angle, bot.targetAngle, 6 * dt);
+
+            bot.x += Math.cos(bot.angle) * bot.speed * dt;
+            bot.y += Math.sin(bot.angle) * bot.speed * dt;
+            this.resolveEntityWallCollision(bot);
+          } else {
+            bot.stateTimer -= dt;
+            if (bot.stateTimer <= 0) {
+              bot.stateTimer = 1.5 + Math.random() * 2.5;
+              const randomAngle = Math.random() * Math.PI * 2;
+              bot.patrolDir = { x: Math.cos(randomAngle), y: Math.sin(randomAngle) };
+            }
+
+            bot.targetAngle = Math.atan2(bot.patrolDir.y, bot.patrolDir.x);
+            bot.angle = this.smoothRotate(bot.angle, bot.targetAngle, 4 * dt);
+
+            const nextX = bot.x + bot.patrolDir.x * (bot.speed * 0.65) * dt;
+            const nextY = bot.y + bot.patrolDir.y * (bot.speed * 0.65) * dt;
+
+            if (this.isSolidWall(nextX + bot.patrolDir.x * 22, nextY + bot.patrolDir.y * 22)) {
+              bot.stateTimer = 0;
+            } else {
+              bot.x = nextX;
+              bot.y = nextY;
+            }
+            this.resolveEntityWallCollision(bot);
+          }
+        }
+      }
+
+      smoothRotate(current, target, rate) {
+        let diff = (target - current) % (Math.PI * 2);
+        if (diff > Math.PI) diff -= Math.PI * 2;
+        if (diff < -Math.PI) diff += Math.PI * 2;
+        return current + diff * Math.min(1, rate);
+      }
+
+      /* =========================================================================
+         UPDATE LOOP & CAMERA INTERPOLATION
+         ========================================================================= */
+      update(dt) {
+        if (!this.isRunning || this.isGameOver) return;
+
+        // 1. Player Movement (WASD)
+        let moveX = 0;
+        let moveY = 0;
+        if (this.keys['w'] || this.keys['arrowup']) moveY -= 1;
+        if (this.keys['s'] || this.keys['arrowdown']) moveY += 1;
+        if (this.keys['a'] || this.keys['arrowleft']) moveX -= 1;
+        if (this.keys['d'] || this.keys['arrowright']) moveX += 1;
+
+        if (moveX !== 0 && moveY !== 0) {
+          const invLen = 1 / Math.SQRT2;
+          moveX *= invLen;
+          moveY *= invLen;
+        }
+
+        this.player.x += moveX * GameConfig.playerSpeed * dt;
+        this.player.y += moveY * GameConfig.playerSpeed * dt;
+        this.resolveEntityWallCollision(this.player);
+
+        // Update world mouse coords
+        this.updateMouseWorldCoords();
+
+        // Player rotates to mouse cursor
+        this.player.angle = Math.atan2(this.mouse.worldY - this.player.y, this.mouse.worldX - this.player.x);
+
+        // Automatic firing
+        if (this.mouse.isDown && this.player.weaponStats.automatic) {
+          this.tryPlayerShoot();
+        }
+
+        // Recoil recovery
+        if (this.player.recoilAngle > 0) {
+          this.player.recoilAngle = Math.max(0, this.player.recoilAngle - 18 * dt);
+        }
+
+        // Reload Timer
+        if (this.player.isReloading) {
+          this.player.reloadTimer -= dt * 1000;
+          if (this.player.reloadTimer <= 0) {
+            this.player.isReloading = false;
+            this.player.currentAmmo = this.player.weaponStats.magSize;
+            this.updateHUD();
+          }
+        }
+
+        // 2. Camera Tracking (Centering with subtle mouse tactical lead)
+        const leadFactor = 0.12;
+        const targetCamX = this.player.x + (this.mouse.worldX - this.player.x) * leadFactor;
+        const targetCamY = this.player.y + (this.mouse.worldY - this.player.y) * leadFactor;
+        this.camera.x += (targetCamX - this.camera.x) * (8 * dt);
+        this.camera.y += (targetCamY - this.camera.y) * (8 * dt);
+
+        // Clamp camera so it stays within arena bounds
+        const halfViewW = (this.canvas.width / 2) / this.camera.zoom;
+        const halfViewH = (this.canvas.height / 2) / this.camera.zoom;
+        if (this.worldWidth > halfViewW * 2) {
+          this.camera.x = Math.max(halfViewW, Math.min(this.camera.x, this.worldWidth - halfViewW));
+        } else {
+          this.camera.x = this.worldWidth / 2;
+        }
+        if (this.worldHeight > halfViewH * 2) {
+          this.camera.y = Math.max(halfViewH, Math.min(this.camera.y, this.worldHeight - halfViewH));
+        } else {
+          this.camera.y = this.worldHeight / 2;
+        }
+
+        // 3. Update Bots
+        this.updateBots(dt);
+
+        // 4. Update Bullets
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+          const b = this.bullets[i];
+          b.life -= dt;
+          if (b.life <= 0) {
+            this.bullets.splice(i, 1);
+            continue;
+          }
+
+          const nextX = b.x + b.vx * dt;
+          const nextY = b.y + b.vy * dt;
+
+          if (this.isSolidWall(nextX, nextY)) {
+            this.spawnHitSparks(nextX, nextY, '#e2e8f0');
+            this.wallImpacts.push({ x: nextX, y: nextY, life: 6.0 });
+            this.bullets.splice(i, 1);
+            continue;
+          }
+
+          let hitEntity = false;
+          if (b.isPlayerBullet) {
+            for (const bot of this.bots) {
+              if (bot.hp <= 0) continue;
+              const dist = Math.hypot(bot.x - nextX, bot.y - nextY);
+              if (dist < bot.radius + 3) {
+                bot.hp -= b.damage;
+                SoundFx.playHit();
+                this.spawnHitSparks(nextX, nextY, '#ef4444');
+                hitEntity = true;
+                if (bot.hp <= 0) {
+                  this.spawnHitSparks(bot.x, bot.y, '#dc2626');
+                }
+                break;
+              }
+            }
+          } else {
+            const dist = Math.hypot(this.player.x - nextX, this.player.y - nextY);
+            if (dist < this.player.radius + 3) {
+              this.player.hp -= b.damage;
+              SoundFx.playHit();
+              this.spawnHitSparks(nextX, nextY, '#38bdf8');
+              hitEntity = true;
+              this.updateHUD();
+
+              if (this.player.hp <= 0) {
+                this.triggerGameOver(false);
+              }
+            }
+          }
+
+          if (hitEntity) {
+            this.bullets.splice(i, 1);
+            continue;
+          }
+
+          b.x = nextX;
+          b.y = nextY;
+        }
+
+        // 5. Update Particles
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          const p = this.particles[i];
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.life -= dt;
+          p.alpha = Math.max(0, p.life * 4);
+          if (p.life <= 0) {
+            this.particles.splice(i, 1);
+          }
+        }
+
+        // 6. Compute Visibility Polygon
+        if (GameConfig.fogOfWarEnabled) {
+          this.computeVisibilityPolygon();
+        }
+
+        // 7. Check Hostiles
+        const aliveBots = this.bots.filter(b => b.hp > 0).length;
+        document.getElementById('hud-bots-count').innerText = aliveBots;
+        if (aliveBots === 0 && !this.isGameOver) {
+          this.triggerGameOver(true);
+        }
+      }
+
+      triggerGameOver(isWin) {
+        this.isGameOver = true;
+        const overlay = document.getElementById('round-overlay');
+        const title = document.getElementById('overlay-title');
+        const subtitle = document.getElementById('overlay-subtitle');
+        const btn = document.getElementById('overlay-button');
+
+        overlay.classList.remove('won', 'lost');
+        if (isWin) {
+          overlay.classList.add('won');
+          title.innerText = 'ROUND WON';
+          subtitle.innerText = 'All hostile AI bots eliminated. Facility zone secured.';
+          btn.innerText = 'DEPLOY NEXT ROUND';
+        } else {
+          overlay.classList.add('lost');
+          title.innerText = 'ROUND LOST';
+          subtitle.innerText = 'Operative KIA. Hostile squad overwhelmed your position.';
+          btn.innerText = 'RETRY ROUND';
+        }
+        overlay.classList.add('active');
+      }
+
+      /* =========================================================================
+         RENDERING PIPELINE (Crisp Visuals + Fixed Offscreen Fog of War)
+         ========================================================================= */
+      render() {
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Apply Camera Transform
+        ctx.save();
+        ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+        ctx.scale(this.camera.zoom, this.camera.zoom);
+        ctx.translate(-this.camera.x, -this.camera.y);
+
+        // --- LAYER 1: FLOOR TILES ---
+        // [SPRITE HOOK]: Replace fillRect with ctx.drawImage(floorSprite, x, y, size, size)
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            const x = c * this.tileSize;
+            const y = r * this.tileSize;
+            if (this.map[r][c] !== 1) {
+              // Tactical Floor Tile
+              ctx.fillStyle = '#111827';
+              ctx.fillRect(x, y, this.tileSize, this.tileSize);
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(x, y, this.tileSize, this.tileSize);
+            }
+          }
+        }
+
+        // --- LAYER 2: WALL IMPACT MARKS ---
+        ctx.fillStyle = '#030712';
+        for (const imp of this.wallImpacts) {
+          ctx.beginPath();
+          ctx.arc(imp.x, imp.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // --- LAYER 3: BOTS (RENDERED CRISPLY WHEN VISIBLE) ---
+        // If Fog of War is enabled, bots behind walls are hidden
+        for (const bot of this.bots) {
+          if (bot.hp <= 0) continue;
+
+          const isVisible = !GameConfig.fogOfWarEnabled || this.hasLineOfSight(this.player.x, this.player.y, bot.x, bot.y);
+          if (!isVisible) continue;
+
+          // [SPRITE HOOK]: Replace bot circle with ctx.drawImage(botSprite, ...)
+          ctx.save();
+          ctx.translate(bot.x, bot.y);
+          ctx.rotate(bot.angle);
+
+          // Bot Tactical Body: Crimson Red
+          ctx.fillStyle = '#dc2626';
+          ctx.beginPath();
+          ctx.arc(0, 0, bot.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = '#991b1b';
+          ctx.stroke();
+
+          // Bot Tactical Vest / Core
+          ctx.fillStyle = '#7f1d1d';
+          ctx.beginPath();
+          ctx.arc(0, 0, bot.radius * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Bot Weapon Barrel
+          ctx.strokeStyle = '#f87171';
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(bot.radius + 10, 0);
+          ctx.stroke();
+
+          ctx.restore();
+
+          // Bot Health Bar
+          const barW = 30;
+          const barH = 4;
+          const hpPct = Math.max(0, bot.hp / bot.maxHp);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+          ctx.fillRect(bot.x - barW / 2, bot.y - bot.radius - 12, barW, barH);
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(bot.x - barW / 2, bot.y - bot.radius - 12, barW * hpPct, barH);
+
+          // Bot State Badge
+          if (bot.state === 'Shoot') {
+            ctx.fillStyle = '#f87171';
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText('ENGAGING', bot.x - 24, bot.y - bot.radius - 16);
+          }
+        }
+
+        // --- LAYER 4: PLAYER OPERATIVE ---
+        // [SPRITE HOOK]: Replace player drawing with ctx.drawImage(playerSprite, ...)
+        if (this.player && this.player.hp > 0) {
+          ctx.save();
+          ctx.translate(this.player.x, this.player.y);
+          ctx.rotate(this.player.angle);
+
+          // Tactical Operative Flashlight Cone
+          const flashGrad = ctx.createRadialGradient(0, 0, 10, 160, 0, 220);
+          flashGrad.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
+          flashGrad.addColorStop(0.7, 'rgba(56, 189, 248, 0.08)');
+          flashGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+          ctx.fillStyle = flashGrad;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, 320, -0.4, 0.4);
+          ctx.closePath();
+          ctx.fill();
+
+          // Operative Body: Blue circle
+          ctx.fillStyle = '#38bdf8';
+          ctx.beginPath();
+          ctx.arc(0, 0, this.player.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = '#0284c7';
+          ctx.stroke();
+
+          // Tactical Vest Armor
+          ctx.fillStyle = '#0369a1';
+          ctx.beginPath();
+          ctx.arc(0, 0, this.player.radius * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Weapon Barrel / Aim Line
+          ctx.strokeStyle = '#e0f2fe';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(this.player.radius + 12, 0);
+          ctx.stroke();
+
+          ctx.restore();
+        }
+
+        // --- LAYER 5: BULLETS (Yellow tracers) ---
+        // [SPRITE HOOK]: Replace with bullet sprites if desired
+        ctx.strokeStyle = '#fde047';
+        ctx.lineWidth = 2.5;
+        for (const b of this.bullets) {
+          ctx.beginPath();
+          ctx.moveTo(b.x, b.y);
+          const tailLen = 10;
+          const spd = Math.hypot(b.vx, b.vy);
+          if (spd > 0) {
+            ctx.lineTo(b.x - (b.vx / spd) * tailLen, b.y - (b.vy / spd) * tailLen);
+          }
+          ctx.stroke();
+        }
+
+        // --- LAYER 6: PARTICLES ---
+        for (const p of this.particles) {
+          ctx.save();
+          ctx.globalAlpha = p.alpha;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // --- LAYER 7: WALLS (Dark Gray Rectangles with Metallic Bevel) ---
+        // [SPRITE HOOK]: Replace with ctx.drawImage(wallSprite, x, y, size, size)
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            if (this.map[r][c] === 1) {
+              const x = c * this.tileSize;
+              const y = r * this.tileSize;
+
+              // Wall base
+              ctx.fillStyle = '#1e293b';
+              ctx.fillRect(x, y, this.tileSize, this.tileSize);
+
+              // 2.5D Top Bevel Highlight
+              ctx.fillStyle = '#334155';
+              ctx.fillRect(x, y, this.tileSize, 4);
+
+              // Wall Border
+              ctx.strokeStyle = '#0f172a';
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(x, y, this.tileSize, this.tileSize);
+            }
+          }
+        }
+
+        // --- LAYER 8: FOG OF WAR (SECTOR ILLUMINATION) ---
+        // CRITICAL FIX: Rendered onto dedicated offscreen buffer then stamped over world.
+        // This ensures the player, bots, and floors are NEVER erased into transparent darkness!
+        if (GameConfig.fogOfWarEnabled && this.fovPolygon.length > 2) {
+          const fCtx = this.fogCtx;
+          // 1. Fill offscreen fog canvas with tactical shadow
+          fCtx.clearRect(0, 0, this.worldWidth, this.worldHeight);
+          fCtx.fillStyle = 'rgba(8, 12, 20, 0.88)';
+          fCtx.fillRect(0, 0, this.worldWidth, this.worldHeight);
+
+          // 2. Cut out line-of-sight polygon on the offscreen canvas
+          fCtx.save();
+          fCtx.globalCompositeOperation = 'destination-out';
+
+          fCtx.beginPath();
+          fCtx.moveTo(this.player.x, this.player.y);
+          for (const pt of this.fovPolygon) {
+            fCtx.lineTo(pt.x, pt.y);
+          }
+          fCtx.closePath();
+          fCtx.fill();
+
+          // Soft ambient circular glow around operative
+          const ambGrad = fCtx.createRadialGradient(
+            this.player.x, this.player.y, 20,
+            this.player.x, this.player.y, 110
+          );
+          ambGrad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+          ambGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          fCtx.fillStyle = ambGrad;
+          fCtx.beginPath();
+          fCtx.arc(this.player.x, this.player.y, 110, 0, Math.PI * 2);
+          fCtx.fill();
+
+          fCtx.restore();
+
+          // 3. Stamp fog canvas OVER the world in world space
+          ctx.drawImage(this.fogCanvas, 0, 0);
+        }
+
+        // Restore Camera Transform
+        ctx.restore();
+
+        // --- LAYER 9: SCREEN SPACE HUD CROSSHAIR ---
+        this.renderScreenCrosshair(ctx);
+
+        // --- LAYER 10: TACTICAL MINIMAP RADAR ---
+        this.renderRadar();
+      }
+
+      renderScreenCrosshair(ctx) {
+        const mx = this.mouse.screenX;
+        const my = this.mouse.screenY;
+        const recoilSpread = this.player ? this.player.recoilAngle * 1.5 : 0;
+        const gap = 5 + recoilSpread;
+        const len = 7;
+
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+        ctx.lineWidth = 1.8;
+
+        ctx.beginPath();
+        // Top
+        ctx.moveTo(mx, my - gap);
+        ctx.lineTo(mx, my - gap - len);
+        // Bottom
+        ctx.moveTo(mx, my + gap);
+        ctx.lineTo(mx, my + gap + len);
+        // Left
+        ctx.moveTo(mx - gap, my);
+        ctx.lineTo(mx - gap - len, my);
+        // Right
+        ctx.moveTo(mx + gap, my);
+        ctx.lineTo(mx + gap + len, my);
+        ctx.stroke();
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(mx, my, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      renderRadar() {
+        const rCtx = this.radarCtx;
+        const w = this.radarCanvas.width;
+        const h = this.radarCanvas.height;
+
+        rCtx.clearRect(0, 0, w, h);
+
+        // Circular background
+        rCtx.fillStyle = '#0b1320';
+        rCtx.fillRect(0, 0, w, h);
+
+        // Scale factor from world to radar
+        const scaleX = (w - 20) / this.worldWidth;
+        const scaleY = (h - 20) / this.worldHeight;
+        const offsetX = 10;
+        const offsetY = 10;
+
+        // Render mini walls
+        rCtx.fillStyle = 'rgba(71, 85, 105, 0.7)';
+        for (let r = 0; r < this.rows; r++) {
+          for (let c = 0; c < this.cols; c++) {
+            if (this.map[r][c] === 1) {
+              const x = offsetX + c * this.tileSize * scaleX;
+              const y = offsetY + r * this.tileSize * scaleY;
+              rCtx.fillRect(x, y, this.tileSize * scaleX, this.tileSize * scaleY);
+            }
+          }
+        }
+
+        // Render Bots on Radar (when spotted or fired)
+        for (const bot of this.bots) {
+          if (bot.hp <= 0) continue;
+          const isSpotted = !GameConfig.fogOfWarEnabled || bot.canSeePlayer || this.hasLineOfSight(this.player.x, this.player.y, bot.x, bot.y);
+          if (isSpotted) {
+            const bx = offsetX + bot.x * scaleX;
+            const by = offsetY + bot.y * scaleY;
+            rCtx.fillStyle = '#ef4444';
+            rCtx.beginPath();
+            rCtx.arc(bx, by, 3, 0, Math.PI * 2);
+            rCtx.fill();
+          }
+        }
+
+        // Render Player on Radar
+        if (this.player) {
+          const px = offsetX + this.player.x * scaleX;
+          const py = offsetY + this.player.y * scaleY;
+          rCtx.fillStyle = '#38bdf8';
+          rCtx.beginPath();
+          rCtx.arc(px, py, 3.5, 0, Math.PI * 2);
+          rCtx.fill();
+
+          // Player direction arrow
+          rCtx.strokeStyle = '#bae6fd';
+          rCtx.lineWidth = 1.5;
+          rCtx.beginPath();
+          rCtx.moveTo(px, py);
+          rCtx.lineTo(px + Math.cos(this.player.angle) * 7, py + Math.sin(this.player.angle) * 7);
+          rCtx.stroke();
+        }
+
+        // Radar grid sweep circles
+        rCtx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
+        rCtx.lineWidth = 1;
+        rCtx.beginPath();
+        rCtx.arc(w / 2, h / 2, w * 0.25, 0, Math.PI * 2);
+        rCtx.arc(w / 2, h / 2, w * 0.45, 0, Math.PI * 2);
+        rCtx.stroke();
+      }
+
+      updateHUD() {
+        if (!this.player) return;
+
+        const hp = Math.max(0, Math.ceil(this.player.hp));
+        document.getElementById('hud-health-num').innerText = hp;
+        const bar = document.getElementById('hud-health-bar');
+        bar.style.width = hp + '%';
+        if (hp <= 30) {
+          bar.style.background = '#ef4444';
+        } else if (hp <= 60) {
+          bar.style.background = '#f59e0b';
+        } else {
+          bar.style.background = 'linear-gradient(90deg, #ef4444, #10b981)';
+        }
+
+        document.getElementById('hud-weapon-name').innerText = this.player.equippedWeapon;
+        document.getElementById('hud-ammo-cur').innerText = this.player.currentAmmo;
+        document.getElementById('hud-ammo-max').innerText = this.player.weaponStats.magSize;
+
+        const reloadStatus = document.getElementById('hud-reload-status');
+        if (this.player.isReloading) {
+          reloadStatus.style.display = 'inline';
+        } else {
+          reloadStatus.style.display = 'none';
+        }
+
+        ['Pistol', 'Rifle', 'Sniper'].forEach(w => {
+          const tag = document.getElementById('tag-' + w);
+          if (tag) {
+            if (this.player.equippedWeapon === w) {
+              tag.classList.add('active');
+            } else {
+              tag.classList.remove('active');
+            }
+          }
+        });
+      }
+
+      /* =========================================================================
+         REQUESTANIMATIONFRAME GAME LOOP
+         ========================================================================= */
+      start() {
+        const loop = (currentTime) => {
+          const dt = Math.min((currentTime - this.lastTime) / 1000, 0.05);
+          this.lastTime = currentTime;
+
+          this.update(dt);
+          this.render();
+
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      }
+    }
+
+    // Launch game when DOM content is ready
+    window.addEventListener('DOMContentLoaded', () => {
+      window.gameEngine = new TacticalShooterGame();
+      window.gameEngine.start();
+    });
+  </script>
+</body>
+</html>

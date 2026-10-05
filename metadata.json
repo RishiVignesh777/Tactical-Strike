@@ -1,0 +1,6 @@
+{
+  "name": "Tactical Strike 2D",
+  "description": "Top-down tactical 2D shooter featuring offline AI bot combat, dynamic line-of-sight fog of war, modular weapon mechanics, and realistic recoil ballistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
