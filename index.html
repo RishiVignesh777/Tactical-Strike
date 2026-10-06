@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tactical Strike 2D - CS Economy & Buy Phase</title>
-  <meta name="description" content="Top-down tactical 2D shooter featuring Counter-Strike economy, buy phase, weapons arsenal, armor, and offline bot matches." />
+  <title>Tactical Strike 2D - CS Economy & Auto-Shoot</title>
+  <meta name="description" content="Top-down tactical 2D shooter featuring Counter-Strike economy, auto-shoot target lock, buy phase, weapons arsenal, and offline bot matches." />
   <meta property="og:title" content="Tactical Strike 2D" />
-  <meta property="og:description" content="Top-down tactical 2D shooter with CS economy, buy phase, and round matches." />
+  <meta property="og:description" content="Top-down tactical 2D shooter with CS economy, auto-shoot, and round matches." />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
 
@@ -256,6 +256,44 @@
       width: 0%;
       background: #38bdf8;
       transition: width 0.15s ease-out;
+    }
+
+    /* Center Feature Controls */
+    .hud-center-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .hud-feature-btn {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1.5px solid rgba(56, 189, 248, 0.3);
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+      pointer-events: auto;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+    .hud-feature-btn:hover {
+      background: rgba(30, 41, 59, 0.95);
+      color: #f1f5f9;
+      border-color: #38bdf8;
+    }
+    .hud-feature-btn.active {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.18);
+      color: #fca5a5;
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
+    }
+    .hud-feature-btn.active strong {
+      color: #ef4444;
     }
 
     /* Cash Display */
@@ -643,11 +681,19 @@
           </div>
         </div>
 
-        <!-- CS Economy Cash & Buy Prompt -->
-        <div class="cash-panel">
-          <div class="hud-label">Current Funds</div>
-          <div id="hud-cash" class="cash-amount">$800</div>
-          <div id="hud-buy-btn" class="buy-prompt-tag" onclick="window.toggleBuyMenu()">BUY MENU [B]</div>
+        <!-- Center Controls: Auto-Shoot & Cash -->
+        <div class="hud-center-group">
+          <!-- Auto-Shoot Toggle Button -->
+          <button id="btn-auto-shoot" class="hud-feature-btn active" onclick="window.toggleAutoShoot()">
+            AUTO-SHOOT: <strong id="auto-shoot-status">ON</strong> [T]
+          </button>
+
+          <!-- CS Economy Cash & Buy Prompt -->
+          <div class="cash-panel">
+            <div class="hud-label">Current Funds</div>
+            <div id="hud-cash" class="cash-amount">$800</div>
+            <div id="hud-buy-btn" class="buy-prompt-tag" onclick="window.toggleBuyMenu()">BUY MENU [B]</div>
+          </div>
         </div>
 
         <!-- Weapon & Ammo -->
@@ -783,7 +829,7 @@
     </div>
   </div>
 
-  <!-- GAME SCRIPT WITH COMPLETE CS ECONOMY & ROUND LOGIC -->
+  <!-- GAME SCRIPT WITH COMPLETE CS ECONOMY, AUTO-SHOOT & ROUND LOGIC -->
   <script>
     /* =========================================================================
        GAME CONFIGURATION BLOCK
@@ -798,8 +844,8 @@
       lossMaxBonus: 3400,
 
       // Match Timers
-      freezeTimeSeconds: 10, // 10s buy phase countdown with instant skip [SPACE]
-      roundTimeSeconds: 110,  // 1:50 active match clock
+      freezeTimeSeconds: 10,
+      roundTimeSeconds: 110,
       resetDelaySeconds: 3,
 
       // Tile Grid Map: 0 = floor, 1 = solid wall, 2 = player spawn, 3 = bot spawn
@@ -824,6 +870,7 @@
       playerSpeed: 195,
       botSpeed: 125,
       fogOfWarEnabled: true,
+      autoShootEnabled: true, // Automatically fires weapon when aimed at an enemy bot!
       cameraZoom: 1.15,
 
       // Weapon Definitions
@@ -1025,7 +1072,7 @@
     };
 
     /* =========================================================================
-       TACTICAL 2D GAME ENGINE (CS ECONOMY & ROUND MANAGEMENT)
+       TACTICAL 2D GAME ENGINE (CS ECONOMY, AUTO-SHOOT & ROUND CYCLES)
        ========================================================================= */
     class TacticalShooterGame {
       constructor() {
@@ -1059,6 +1106,9 @@
         this.keys = {};
         this.mouse = { screenX: 0, screenY: 0, worldX: 0, worldY: 0, isDown: false };
 
+        // Auto-shoot targeting state
+        this.isAimingAtEnemy = false;
+
         // Match Scores & Streaks
         this.scoreCT = 0;
         this.scoreT = 0;
@@ -1072,7 +1122,7 @@
         this.roundWinner = null;
         this.isBuyMenuOpen = false;
 
-        // CRITICAL: Initialize loop timestamp so dt is never NaN!
+        // Timestamp initialization
         this.lastTime = performance.now();
 
         // Player Permanent Inventory Across Match
@@ -1155,6 +1205,11 @@
             }
           }
 
+          // Toggle Auto-Shoot: 't'
+          if (e.key.toLowerCase() === 't') {
+            this.toggleAutoShoot();
+          }
+
           // Close modal with ESC
           if (e.key === 'Escape') {
             if (this.isBuyMenuOpen) this.toggleBuyMenu(false);
@@ -1228,6 +1283,12 @@
         window.switchSlot = (slot) => this.switchPlayerSlot(slot);
         window.startNextRoundNow = () => this.startNewRound(false);
         window.skipBuyPhase = () => this.startCombatPhase();
+        window.toggleAutoShoot = () => this.toggleAutoShoot();
+      }
+
+      toggleAutoShoot(force) {
+        GameConfig.autoShootEnabled = force !== undefined ? force : !GameConfig.autoShootEnabled;
+        this.updateHUD();
       }
 
       updateMouseWorldCoords() {
@@ -1253,6 +1314,7 @@
         this.stateTimer = GameConfig.freezeTimeSeconds;
         this.roundWinner = null;
         this.isBuyMenuOpen = false;
+        this.isAimingAtEnemy = false;
         document.getElementById('buy-overlay').classList.remove('active');
 
         this.bullets = [];
@@ -1262,7 +1324,7 @@
         this.playerProfile.roundKills = 0;
         this.playerProfile.roundKillEarnings = 0;
 
-        // 1. Setup Player (Equip saved weapons, or default pistol if killed)
+        // 1. Setup Player
         const activeWeaponKey = this.playerProfile.activeSlot === 'primary' && this.playerProfile.primary
           ? this.playerProfile.primary
           : this.playerProfile.secondary;
@@ -1296,7 +1358,7 @@
         this.camera.x = this.player.x;
         this.camera.y = this.player.y;
 
-        // 2. Bot Buy Logic During Buy Phase & Spawn
+        // 2. Setup Bots
         this.bots = [];
         for (let i = 0; i < this.botProfiles.length; i++) {
           const profile = this.botProfiles[i];
@@ -1305,7 +1367,6 @@
           const spawnX = spawn.x + Math.cos(offsetAngle) * 24;
           const spawnY = spawn.y + Math.sin(offsetAngle) * 24;
 
-          // Bot Economy AI
           this.runBotBuyAI(profile);
 
           const botWeaponKey = profile.primary || profile.secondary;
@@ -1369,6 +1430,7 @@
         if (this.roundState === 'ENDED') return;
         this.roundState = 'ENDED';
         this.roundWinner = winner;
+        this.isAimingAtEnemy = false;
 
         // Update Scores & Streaks
         if (winner === 'CT') {
@@ -1381,7 +1443,6 @@
           this.ctLossStreak++;
         }
 
-        // Calculate Round End Funds
         const playerWon = winner === 'CT';
         let outcomeIncome = 0;
         let lossBonus = 0;
@@ -1397,7 +1458,6 @@
         const totalPlayerGain = outcomeIncome;
         this.playerProfile.cash = Math.min(GameConfig.maxCash, this.playerProfile.cash + totalPlayerGain);
 
-        // Bots end round income
         for (const bot of this.botProfiles) {
           const botWon = winner === 'T';
           let botIncome = 0;
@@ -1410,7 +1470,6 @@
           bot.cash = Math.min(GameConfig.maxCash, bot.cash + botIncome);
         }
 
-        // Equipment Persistence Check:
         if (this.player.hp <= 0) {
           this.playerProfile.primary = null;
           this.playerProfile.secondary = 'Pistol';
@@ -1428,7 +1487,7 @@
           }
         }
 
-        // Populate Summary Modal
+        // Summary Modal
         const banner = document.getElementById('round-banner');
         const bTitle = document.getElementById('banner-title');
         const bReason = document.getElementById('banner-reason');
@@ -1557,6 +1616,68 @@
         if (slot === 'primary' && !this.playerProfile.primary) return;
         this.playerProfile.activeSlot = slot;
         this.applyPlayerEquippedWeapon();
+      }
+
+      /* =========================================================================
+         AUTO-SHOOT TARGET LOCKING ALGORITHM
+         ========================================================================= */
+      checkAutoShootTarget() {
+        if (!this.player || this.roundState !== 'ACTIVE' || this.isBuyMenuOpen) {
+          this.isAimingAtEnemy = false;
+          return;
+        }
+
+        let targetFound = false;
+
+        for (const bot of this.bots) {
+          if (bot.hp <= 0) continue;
+
+          // 1. Line of Sight Check (cannot auto-shoot through solid walls)
+          if (!this.hasLineOfSight(this.player.x, this.player.y, bot.x, bot.y)) {
+            continue;
+          }
+
+          const dist = Math.hypot(bot.x - this.player.x, bot.y - this.player.y);
+          if (dist > 950) continue; // Out of range
+
+          // Check A: Mouse cursor on bot
+          const mouseDistToBot = Math.hypot(this.mouse.worldX - bot.x, this.mouse.worldY - bot.y);
+          if (mouseDistToBot <= bot.radius + 14) {
+            targetFound = true;
+            break;
+          }
+
+          // Check B: Player aim line intersects bot radius
+          // Aim direction vector
+          const cos = Math.cos(this.player.angle);
+          const sin = Math.sin(this.player.angle);
+
+          // Vector from player to bot
+          const toBotX = bot.x - this.player.x;
+          const toBotY = bot.y - this.player.y;
+
+          // Projection along aim line
+          const projection = toBotX * cos + toBotY * sin;
+
+          // Only consider bots in front of the player
+          if (projection > 0 && projection < 950) {
+            // Perpendicular distance squared from bot center to aim ray
+            const perpDistSq = (toBotX * toBotX + toBotY * toBotY) - (projection * projection);
+            const hitTolerance = bot.radius + 12; // Generous hit tolerance cylinder
+
+            if (perpDistSq <= hitTolerance * hitTolerance) {
+              targetFound = true;
+              break;
+            }
+          }
+        }
+
+        this.isAimingAtEnemy = targetFound;
+
+        // Automatically fire weapon when enemy bot is in the crosshair!
+        if (targetFound && GameConfig.autoShootEnabled) {
+          this.tryPlayerShoot();
+        }
       }
 
       /* =========================================================================
@@ -1825,7 +1946,6 @@
          UPDATE TICK LOOP
          ========================================================================= */
       update(dt) {
-        // Robust state timer safety check
         if (isNaN(this.stateTimer)) {
           this.stateTimer = (this.roundState === 'FREEZE') ? GameConfig.freezeTimeSeconds : GameConfig.roundTimeSeconds;
         }
@@ -1843,7 +1963,7 @@
           }
         }
 
-        // 2. Player Movement (Smooth movement during buy phase and combat)
+        // 2. Player Movement & Aiming
         if (this.player && this.player.hp > 0) {
           if (!this.isBuyMenuOpen) {
             let moveX = 0;
@@ -1863,7 +1983,7 @@
             this.player.y += moveY * GameConfig.playerSpeed * dt;
             this.resolveEntityWallCollision(this.player);
 
-            // Automatic firing only during active combat
+            // Manual firing (mouse hold for automatic weapons)
             if (this.roundState === 'ACTIVE' && this.mouse.isDown && this.player.weaponStats.automatic) {
               this.tryPlayerShoot();
             }
@@ -1871,6 +1991,9 @@
 
           this.updateMouseWorldCoords();
           this.player.angle = Math.atan2(this.mouse.worldY - this.player.y, this.mouse.worldX - this.player.x);
+
+          // CHECK AUTO-SHOOT WHEN AIMING AT ENEMY BOT!
+          this.checkAutoShootTarget();
 
           if (this.player.recoilAngle > 0) {
             this.player.recoilAngle = Math.max(0, this.player.recoilAngle - 18 * dt);
@@ -2110,14 +2233,14 @@
           ctx.translate(this.player.x, this.player.y);
           ctx.rotate(this.player.angle);
 
-          // Flashlight
+          // Flashlight / Aim Beam
           const flashGrad = ctx.createRadialGradient(0, 0, 10, 160, 0, 220);
-          flashGrad.addColorStop(0, 'rgba(56, 189, 248, 0.22)');
+          flashGrad.addColorStop(0, this.isAimingAtEnemy ? 'rgba(239, 68, 68, 0.28)' : 'rgba(56, 189, 248, 0.22)');
           flashGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
           ctx.fillStyle = flashGrad;
           ctx.beginPath();
           ctx.moveTo(0, 0);
-          ctx.arc(0, 0, 320, -0.4, 0.4);
+          ctx.arc(0, 0, 320, -0.38, 0.38);
           ctx.closePath();
           ctx.fill();
 
@@ -2140,7 +2263,7 @@
           }
 
           // Gun
-          ctx.strokeStyle = '#e0f2fe';
+          ctx.strokeStyle = this.isAimingAtEnemy ? '#ef4444' : '#e0f2fe';
           ctx.lineWidth = 4;
           ctx.beginPath();
           ctx.moveTo(0, 0);
@@ -2218,7 +2341,7 @@
 
         ctx.restore();
 
-        // 9. Screen Space Crosshair
+        // 9. Screen Space Crosshair with Lock-On Visuals
         this.renderScreenCrosshair(ctx);
 
         // 10. Radar
@@ -2228,27 +2351,45 @@
       renderScreenCrosshair(ctx) {
         const mx = this.mouse.screenX;
         const my = this.mouse.screenY;
+        const isTargetLocked = this.isAimingAtEnemy;
         const spread = this.player ? this.player.recoilAngle * 1.5 : 0;
         const gap = 5 + spread;
         const len = 7;
 
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
-        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = isTargetLocked ? '#ef4444' : 'rgba(56, 189, 248, 0.85)';
+        ctx.lineWidth = isTargetLocked ? 2.4 : 1.8;
         ctx.beginPath();
+        // Top
         ctx.moveTo(mx, my - gap);
         ctx.lineTo(mx, my - gap - len);
+        // Bottom
         ctx.moveTo(mx, my + gap);
         ctx.lineTo(mx, my + gap + len);
+        // Left
         ctx.moveTo(mx - gap, my);
         ctx.lineTo(mx - gap - len, my);
+        // Right
         ctx.moveTo(mx + gap, my);
         ctx.lineTo(mx + gap + len, my);
         ctx.stroke();
 
-        ctx.fillStyle = '#38bdf8';
+        ctx.fillStyle = isTargetLocked ? '#ef4444' : '#38bdf8';
         ctx.beginPath();
-        ctx.arc(mx, my, 1.8, 0, Math.PI * 2);
+        ctx.arc(mx, my, isTargetLocked ? 2.5 : 1.8, 0, Math.PI * 2);
         ctx.fill();
+
+        // Target Lock-On Indicator
+        if (isTargetLocked) {
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(mx, my, gap + 10, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = '#ef4444';
+          ctx.font = 'bold 9px monospace';
+          ctx.fillText('AUTO-LOCK', mx + 16, my + 3);
+        }
       }
 
       renderRadar() {
@@ -2331,6 +2472,19 @@
           phaseEl.innerText = 'ROUND TIME';
           phaseEl.style.color = '#94a3b8';
           if (skipBtn) skipBtn.classList.remove('active');
+        }
+
+        // Auto-Shoot button & status
+        const autoShootBtn = document.getElementById('btn-auto-shoot');
+        const autoShootStatus = document.getElementById('auto-shoot-status');
+        if (autoShootBtn && autoShootStatus) {
+          if (GameConfig.autoShootEnabled) {
+            autoShootBtn.classList.add('active');
+            autoShootStatus.innerText = 'ON';
+          } else {
+            autoShootBtn.classList.remove('active');
+            autoShootStatus.innerText = 'OFF';
+          }
         }
 
         // Vitals
