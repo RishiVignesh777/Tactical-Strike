@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tactical Strike 2D - C4 Bomb Defusal & Utilities</title>
-  <meta name="description" content="Top-down tactical 2D shooter featuring Counter-Strike C4 bomb plant/defuse, HE/Smoke/Flash grenades, stealth footsteps, and CS economy." />
-  <meta property="og:title" content="Tactical Strike 2D - C4 Bomb Defusal" />
-  <meta property="og:description" content="Top-down tactical 2D shooter with C4 bomb plant/defuse, smoke/flash grenades, and noise mechanics." />
+  <title>Tactical Strike 2D - 5v5 Squad Dynamics & C4 Bomb Defusal</title>
+  <meta name="description" content="Top-down tactical 2D shooter featuring 5v5 team squad dynamics, friendly AI teammates, tactical radio commands, C4 bomb plant/defuse, and CS economy." />
+  <meta property="og:title" content="Tactical Strike 2D - 5v5 Squad Dynamics" />
+  <meta property="og:description" content="Top-down tactical 2D shooter with 5v5 squad dynamics, tactical radio orders, C4 bomb plant/defuse, smoke/flash grenades, and noise mechanics." />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
 
@@ -87,6 +87,15 @@
     .buy-item-btn.owned { border-color: #10b981; background: rgba(16, 185, 129, 0.15); cursor: default; }
     .buy-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 12px; font-size: 12px; color: #94a3b8; }
 
+    /* Radio Command Overlay */
+    #radio-menu { position: absolute; bottom: 120px; left: 24px; background: rgba(15, 23, 42, 0.95); border: 1.5px solid #38bdf8; border-radius: 8px; padding: 12px 16px; display: none; flex-direction: column; gap: 6px; z-index: 100; pointer-events: auto; backdrop-filter: blur(8px); box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    #radio-menu.active { display: flex; }
+    .radio-title { font-size: 11px; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid rgba(56, 189, 248, 0.2); padding-bottom: 4px; margin-bottom: 4px; }
+    .radio-item { font-size: 12px; font-weight: 700; color: #e2e8f0; display: flex; gap: 8px; cursor: pointer; padding: 3px 6px; border-radius: 4px; }
+    .radio-item:hover { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
+    .radio-key { color: #fbbf24; font-family: monospace; font-weight: 900; }
+    .radio-status-banner { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); background: rgba(15, 23, 42, 0.88); border: 1px solid #38bdf8; padding: 5px 16px; border-radius: 20px; font-size: 12px; font-weight: 800; color: #38bdf8; display: none; z-index: 20; letter-spacing: 0.5px; }
+
     /* Summary Modal */
     #round-banner { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(6, 10, 18, 0.88); backdrop-filter: blur(10px); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 90; pointer-events: auto; }
     #round-banner.active { display: flex; }
@@ -101,6 +110,17 @@
     <canvas id="gameCanvas"></canvas>
     <div id="flash-overlay"></div>
 
+    <div id="radio-status-banner" class="radio-status-banner">SQUAD ORDER: SPREAD OUT</div>
+
+    <div id="radio-menu">
+      <div class="radio-title">Squad Radio [C]</div>
+      <div class="radio-item" onclick="window.issueRadioCommand(1)"><span class="radio-key">[1]</span> Follow Me</div>
+      <div class="radio-item" onclick="window.issueRadioCommand(2)"><span class="radio-key">[2]</span> Hold Position</div>
+      <div class="radio-item" onclick="window.issueRadioCommand(3)"><span class="radio-key">[3]</span> Execute Site A</div>
+      <div class="radio-item" onclick="window.issueRadioCommand(4)"><span class="radio-key">[4]</span> Execute Site B</div>
+      <div class="radio-item" onclick="window.issueRadioCommand(5)"><span class="radio-key">[5]</span> Spread Out</div>
+    </div>
+
     <div id="action-prompt">
       <div id="action-text" class="action-text">HOLD [E] TO DEFUSE BOMB</div>
       <div class="action-bar-bg"><div id="action-bar-fill" class="action-bar-fill"></div></div>
@@ -109,11 +129,11 @@
     <div id="hud">
       <div class="hud-top-bar">
         <div class="score-box">
-          <span class="team-ct">CT (YOU)</span>
+          <span class="team-ct">CT (ALPHA)</span>
           <span id="score-ct" class="score-num">0</span>
-          <span style="color: #64748b; font-weight: 700;">:</span>
+          <span id="alive-counts" style="color: #94a3b8; font-size: 11px; font-weight: 700;">(5 vs 5)</span>
           <span id="score-t" class="score-num">0</span>
-          <span class="team-t">T (BOTS)</span>
+          <span class="team-t">T (BRAVO)</span>
         </div>
 
         <div class="match-timer-box">
@@ -234,8 +254,15 @@
     const GameConfig = {
       startingCash: 800, maxCash: 16000, roundWinBonus: 3250, lossBaseBonus: 1400, lossStreakStep: 500, lossMaxBonus: 3400,
       freezeTimeSeconds: 10, roundTimeSeconds: 110, c4FuseSeconds: 40, c4PlantTime: 3.5, c4DefuseTime: 10, c4DefuseKitTime: 5,
-      tileSize: 52, botCount: 4, playerSpeed: 195, walkSpeedRatio: 0.5, botSpeed: 125,
+      tileSize: 52, friendlyBotCount: 4, enemyBotCount: 5, playerSpeed: 195, walkSpeedRatio: 0.5, botSpeed: 125,
       fogOfWarEnabled: true, autoShootEnabled: true, cameraZoom: 1.15,
+      radioCommands: {
+        1: { id: 'follow', title: 'Follow Me', text: 'SQUAD ORDER: FALL INTO FORMATION' },
+        2: { id: 'hold', title: 'Hold Position', text: 'SQUAD ORDER: HOLD POSITION & SIGHTLINES' },
+        3: { id: 'site_a', title: 'Execute Site A', text: 'SQUAD ORDER: EXECUTE BOMB SITE A' },
+        4: { id: 'site_b', title: 'Execute Site B', text: 'SQUAD ORDER: EXECUTE BOMB SITE B' },
+        5: { id: 'spread', title: 'Spread Out', text: 'SQUAD ORDER: SPREAD OUT & PATROL' }
+      },
       sites: {
         A: { x: 990, y: 155, radius: 80, label: 'SITE A' },
         B: { x: 780, y: 520, radius: 80, label: 'SITE B' }
@@ -335,17 +362,36 @@
         this.roundNumber = 1; this.roundState = 'FREEZE'; this.stateTimer = GameConfig.freezeTimeSeconds;
         this.isBuyMenuOpen = false; this.lastTime = performance.now();
 
-        // Player Profile Across Rounds
+        // Player Profile Across Rounds (Team_Alpha / CT)
         this.playerProfile = {
+          id: 'player', name: 'You (CT)', team: 'Team_Alpha',
           cash: GameConfig.startingCash, primary: null, secondary: 'Pistol', grenade: null,
           activeSlot: 'secondary', armor: 0, hasHelmet: false, hasDefuseKit: false,
           roundKills: 0, roundKillEarnings: 0
         };
 
-        // Bot Profiles Across Rounds
+        // Squad Radio State
+        this.isRadioMenuOpen = false;
+        this.currentSquadOrder = 'spread';
+
+        // Bot Profiles Across Rounds (4 Friendly CT + 5 Enemy T)
+        const friendlyNames = ['Bot Alpha', 'Bot Bravo', 'Bot Charlie', 'Bot Delta'];
         this.botProfiles = [];
-        for (let i = 0; i < GameConfig.botCount; i++) {
-          this.botProfiles.push({ id: i + 1, cash: GameConfig.startingCash, primary: null, secondary: 'Pistol', armor: 0, hasHelmet: false });
+        for (let i = 0; i < GameConfig.friendlyBotCount; i++) {
+          this.botProfiles.push({
+            id: 'friendly_' + (i + 1),
+            name: friendlyNames[i] || `Bot ${i + 1}`,
+            team: 'Team_Alpha',
+            cash: GameConfig.startingCash, primary: null, secondary: 'Pistol', armor: 0, hasHelmet: false
+          });
+        }
+        for (let i = 0; i < GameConfig.enemyBotCount; i++) {
+          this.botProfiles.push({
+            id: 'enemy_' + (i + 1),
+            name: `Enemy ${i + 1}`,
+            team: 'Team_Bravo',
+            cash: GameConfig.startingCash, primary: null, secondary: 'Pistol', armor: 0, hasHelmet: false
+          });
         }
 
         // Entities & Systems
@@ -389,15 +435,29 @@
           this.keys[e.key.toLowerCase()] = true;
           if (e.key === 'Shift') this.keys['shift'] = true;
           if (e.key.toLowerCase() === 'b' && this.roundState === 'FREEZE') this.toggleBuyMenu(!this.isBuyMenuOpen);
-          if (e.key === 'Escape' && this.isBuyMenuOpen) this.toggleBuyMenu(false);
+          if (e.key === 'Escape') {
+            if (this.isBuyMenuOpen) this.toggleBuyMenu(false);
+            if (this.isRadioMenuOpen) this.toggleRadioMenu(false);
+          }
           if (e.code === 'Space' && this.roundState === 'FREEZE') { e.preventDefault(); this.startCombatPhase(); }
           if (e.key.toLowerCase() === 't') this.toggleAutoShoot();
           if (e.key.toLowerCase() === 'g') this.dropOrSwapWeapon();
+          if (e.key.toLowerCase() === 'c' && !this.isBuyMenuOpen) {
+            this.toggleRadioMenu(!this.isRadioMenuOpen);
+          }
+
+          if (this.isRadioMenuOpen) {
+            const num = parseInt(e.key);
+            if (num >= 1 && num <= 5) {
+              this.issueRadioCommand(num);
+              return;
+            }
+          }
 
           if (this.isBuyMenuOpen) {
             const map = { '1': 'Pistol', '2': 'Deagle', '3': 'HE', '4': 'Rifle' };
             if (map[e.key]) this.executePurchase(map[e.key]);
-          } else {
+          } else if (!this.isRadioMenuOpen) {
             if (e.key === '1') this.switchSlot('secondary');
             if (e.key === '2') this.switchSlot('primary');
             if (e.key === '3') this.switchSlot('grenade');
@@ -438,6 +498,40 @@
         window.startNextRoundNow = () => this.startNewRound(false);
         window.skipBuyPhase = () => this.startCombatPhase();
         window.toggleAutoShoot = () => this.toggleAutoShoot();
+        window.toggleRadioMenu = (o) => this.toggleRadioMenu(o);
+        window.issueRadioCommand = (n) => this.issueRadioCommand(n);
+      }
+
+      toggleRadioMenu(force) {
+        if (this.isBuyMenuOpen) return;
+        this.isRadioMenuOpen = force !== undefined ? force : !this.isRadioMenuOpen;
+        const el = document.getElementById('radio-menu');
+        if (el) el.classList.toggle('active', this.isRadioMenuOpen);
+      }
+
+      issueRadioCommand(num) {
+        const cmd = GameConfig.radioCommands[num];
+        if (!cmd) return;
+        this.currentSquadOrder = cmd.id;
+        this.toggleRadioMenu(false);
+        SoundFx.playBeep();
+
+        const banner = document.getElementById('radio-status-banner');
+        if (banner) {
+          banner.innerText = cmd.text;
+          banner.style.display = 'block';
+          clearTimeout(this._radioBannerTimer);
+          this._radioBannerTimer = setTimeout(() => { banner.style.display = 'none'; }, 2800);
+        }
+
+        for (const bot of this.bots) {
+          if (bot.team === 'Team_Alpha' && bot.hp > 0) {
+            bot.squadOrder = cmd.id;
+            if (cmd.id === 'hold') {
+              bot.holdPosition = { x: bot.x, y: bot.y };
+            }
+          }
+        }
       }
 
       toggleBuyMenu(force) {
@@ -480,6 +574,7 @@
         const wStats = GameConfig.weapons[activeKey];
 
         this.player = {
+          id: 'player', name: 'You (CT)', team: 'Team_Alpha',
           x: this.playerSpawn.x, y: this.playerSpawn.y, radius: 17, hp: 100, maxHp: 100, angle: 0,
           equippedWeapon: activeKey, weaponStats: { ...wStats }, currentAmmo: wStats.magSize,
           isReloading: false, reloadTimer: 0, lastShotTime: 0, recoilAngle: 0,
@@ -491,32 +586,65 @@
 
         this.camera.x = this.player.x; this.camera.y = this.player.y;
 
-        // Bots setup & C4 Bomb assignment to a Terrorist Bot
+        // Squad bots setup
         this.bots = [];
-        const botCount = Math.min(GameConfig.botCount, this.botProfiles.length);
-        const c4CarrierIndex = Math.floor(Math.random() * botCount);
+        const enemyProfiles = this.botProfiles.filter(p => p.team === 'Team_Bravo');
+        const friendlyProfiles = this.botProfiles.filter(p => p.team === 'Team_Alpha');
+        const c4EnemyIndex = Math.floor(Math.random() * enemyProfiles.length);
 
         this.c4 = {
-          carrierId: this.botProfiles[c4CarrierIndex].id,
+          carrierId: enemyProfiles[c4EnemyIndex] ? enemyProfiles[c4EnemyIndex].id : null,
+          carrierTeam: 'Team_Bravo',
           planted: false, defused: false, defusing: false, timer: GameConfig.c4FuseSeconds,
           x: 0, y: 0, lastBeepTime: 0
         };
 
-        for (let i = 0; i < botCount; i++) {
-          const profile = this.botProfiles[i], spawn = this.botSpawns[i % this.botSpawns.length];
-          const offsetAngle = (i / botCount) * Math.PI * 2;
-          const spawnX = spawn.x + Math.cos(offsetAngle) * 24, spawnY = spawn.y + Math.sin(offsetAngle) * 24;
+        // 1. Spawn Friendly CT Bots around Player
+        for (let i = 0; i < friendlyProfiles.length; i++) {
+          const profile = friendlyProfiles[i];
+          const offsetAngle = (i / friendlyProfiles.length) * Math.PI * 2 + 0.4;
+          const spawnX = this.playerSpawn.x + Math.cos(offsetAngle) * 36;
+          const spawnY = this.playerSpawn.y + Math.sin(offsetAngle) * 36;
 
           this.botBuyAI(profile);
           const bKey = profile.primary || profile.secondary;
           const bStats = GameConfig.weapons[bKey];
 
           this.bots.push({
-            id: profile.id, profile: profile, x: spawnX, y: spawnY, radius: 17, hp: 100, maxHp: 100,
-            angle: Math.random() * Math.PI * 2, targetAngle: 0, speed: GameConfig.botSpeed,
-            state: 'Patrol', stateTimer: 1.5, patrolDir: { x: 1, y: 0 }, lastKnownPlayerPos: null,
+            id: profile.id, name: profile.name, team: 'Team_Alpha', profile: profile,
+            x: spawnX, y: spawnY, radius: 17, hp: 100, maxHp: 100,
+            angle: 0, targetAngle: 0, speed: GameConfig.botSpeed,
+            state: 'Patrol', stateTimer: 1.5, patrolDir: { x: 1, y: 0 },
+            lastKnownEnemyPos: null, targetEnemy: null,
+            squadOrder: this.currentSquadOrder, holdPosition: null,
             equippedWeapon: bKey, weaponStats: { ...bStats }, lastShotTime: 0, shootInaccuracy: 0.12,
-            hasC4: (i === c4CarrierIndex), plantingProgress: 0, flashTimer: 0
+            hasC4: false, plantingProgress: 0, isDefusing: false, defuseProgress: 0,
+            hasDefuseKit: Math.random() < 0.5, flashTimer: 0
+          });
+        }
+
+        // 2. Spawn Enemy T Bots at Enemy Spawns
+        for (let i = 0; i < enemyProfiles.length; i++) {
+          const profile = enemyProfiles[i];
+          const spawn = this.botSpawns[i % this.botSpawns.length];
+          const offsetAngle = (i / enemyProfiles.length) * Math.PI * 2;
+          const spawnX = spawn.x + Math.cos(offsetAngle) * 26;
+          const spawnY = spawn.y + Math.sin(offsetAngle) * 26;
+
+          this.botBuyAI(profile);
+          const bKey = profile.primary || profile.secondary;
+          const bStats = GameConfig.weapons[bKey];
+
+          this.bots.push({
+            id: profile.id, name: profile.name, team: 'Team_Bravo', profile: profile,
+            x: spawnX, y: spawnY, radius: 17, hp: 100, maxHp: 100,
+            angle: Math.PI, targetAngle: Math.PI, speed: GameConfig.botSpeed,
+            state: 'Patrol', stateTimer: 1.5, patrolDir: { x: -1, y: 0 },
+            lastKnownEnemyPos: null, targetEnemy: null,
+            squadOrder: 'spread', holdPosition: null,
+            equippedWeapon: bKey, weaponStats: { ...bStats }, lastShotTime: 0, shootInaccuracy: 0.12,
+            hasC4: (i === c4EnemyIndex), plantingProgress: 0, isDefusing: false, defuseProgress: 0,
+            hasDefuseKit: false, flashTimer: 0
           });
         }
 
@@ -819,25 +947,37 @@
           this.bullets.push({
             x: this.player.x + Math.cos(a) * 22, y: this.player.y + Math.sin(a) * 22,
             vx: Math.cos(a) * stats.bulletSpeed, vy: Math.sin(a) * stats.bulletSpeed,
-            damage: stats.damage, killReward: stats.killReward, isPlayer: true, life: 2.0
+            damage: stats.damage, killReward: stats.killReward, team: 'Team_Alpha', shooterId: 'player', life: 2.0
           });
         }
 
         this.player.recoilAngle = Math.min(this.player.recoilAngle + stats.recoilSpread * 0.8, stats.maxRecoil);
         SoundFx.playShot(stats.id);
-        this.addNoisePing(this.player.x, this.player.y, 450); // Gunfire alerts bots!
+        this.addNoisePing(this.player.x, this.player.y, 450, 'Team_Alpha');
         this.spawnSparks(this.player.x + Math.cos(this.player.angle) * 22, this.player.y + Math.sin(this.player.angle) * 22, '#fef08a', 4);
         this.updateHUD();
         if (this.player.currentAmmo === 0) this.player.startReload();
       }
 
-      addNoisePing(x, y, radius) {
+      addNoisePing(x, y, radius, sourceTeam = 'Team_Alpha') {
         this.noisePings.push({ x: x, y: y, maxRadius: radius, radius: 10, alpha: 1.0 });
-        // Alert bots within radius
         this.bots.forEach(b => {
-          if (b.hp > 0 && Math.hypot(b.x - x, b.y - y) < radius) {
-            b.lastKnownPlayerPos = { x: x, y: y };
+          if (b.hp > 0 && b.team !== sourceTeam && Math.hypot(b.x - x, b.y - y) < radius) {
+            b.lastKnownEnemyPos = { x: x, y: y };
             b.state = 'Chase';
+          }
+        });
+      }
+
+      handleTradeKills(victim, killer) {
+        if (!victim || !killer) return;
+        const kx = killer.x, ky = killer.y;
+        this.bots.forEach(b => {
+          if (b.hp > 0 && b.team === victim.team && b !== victim) {
+            if (Math.hypot(b.x - victim.x, b.y - victim.y) < 650) {
+              b.lastKnownEnemyPos = { x: kx, y: ky };
+              b.state = 'Chase';
+            }
           }
         });
       }
@@ -850,26 +990,117 @@
       }
 
       /* =========================================================================
-         BOTS STATE MACHINE & BOMB PLANTING
+         BOTS COOPERATIVE AI, ORDERS & LINE-OF-FIRE CAUTION
          ========================================================================= */
+      checkLineOfFireClear(bot, angle, maxDist) {
+        const teammates = (bot.team === 'Team_Alpha')
+          ? [this.player, ...this.bots.filter(b => b.team === 'Team_Alpha' && b !== bot && b.hp > 0)]
+          : this.bots.filter(b => b.team === 'Team_Bravo' && b !== bot && b.hp > 0);
+
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        for (const tm of teammates) {
+          if (!tm || tm.hp <= 0) continue;
+          const toX = tm.x - bot.x, toY = tm.y - bot.y;
+          const proj = toX * cos + toY * sin;
+          if (proj > 12 && proj < maxDist) {
+            const perpSq = (toX * toX + toY * toY) - (proj * proj);
+            if (perpSq <= (tm.radius + 12) * (tm.radius + 12)) return false; // Blocked by teammate!
+          }
+        }
+        return true;
+      }
+
       updateBots(dt) {
         if (!this.player || this.roundState !== 'ACTIVE') return;
 
-        for (const bot of this.bots) {
+        // Check who should defuse if C4 is planted
+        let designatedDefuser = null;
+        if (this.c4 && this.c4.planted && !this.c4.defused) {
+          let bestDist = Infinity;
+          for (const b of this.bots) {
+            if (b.hp > 0 && b.team === 'Team_Alpha') {
+              const d = Math.hypot(b.x - this.c4.x, b.y - this.c4.y);
+              if (d < bestDist) { bestDist = d; designatedDefuser = b; }
+            }
+          }
+        }
+
+        // Check if C4 is dropped on the ground
+        const droppedC4 = this.droppedItems.find(it => it.type === 'c4');
+
+        for (let bIdx = 0; bIdx < this.bots.length; bIdx++) {
+          const bot = this.bots[bIdx];
           if (bot.hp <= 0) continue;
-          if (bot.flashTimer > 0) { bot.flashTimer -= dt; continue; } // Blinded
+          if (bot.flashTimer > 0) { bot.flashTimer -= dt; continue; }
 
-          const distToPlayer = Math.hypot(this.player.x - bot.x, this.player.y - bot.y);
-          const hasSight = distToPlayer < 650 && this.hasLoS(bot.x, bot.y, this.player.x, this.player.y);
+          // 1. Determine Opponents
+          const enemies = (bot.team === 'Team_Alpha')
+            ? this.bots.filter(b => b.team === 'Team_Bravo' && b.hp > 0)
+            : [this.player, ...this.bots.filter(b => b.team === 'Team_Alpha' && b.hp > 0)].filter(e => e && e.hp > 0);
 
-          if (hasSight) { bot.lastKnownPlayerPos = { x: this.player.x, y: this.player.y }; }
+          // Find closest visible enemy
+          let closestEnemy = null, closestDist = Infinity;
+          for (const en of enemies) {
+            const d = Math.hypot(en.x - bot.x, en.y - bot.y);
+            if (d < 680 && this.hasLoS(bot.x, bot.y, en.x, en.y)) {
+              if (d < closestDist) { closestDist = d; closestEnemy = en; }
+            }
+          }
 
-          // C4 Bomb Carrier Bot Logic
+          if (closestEnemy) {
+            bot.lastKnownEnemyPos = { x: closestEnemy.x, y: closestEnemy.y };
+          }
+
+          // 2. Objective Handling
+          // CT Defusing Logic
+          if (this.c4 && this.c4.planted && !this.c4.defused && bot.team === 'Team_Alpha') {
+            if (bot === designatedDefuser) {
+              const dToBomb = Math.hypot(this.c4.x - bot.x, this.c4.y - bot.y);
+              if (dToBomb < 42) {
+                bot.isDefusing = true;
+                const defTime = bot.hasDefuseKit ? GameConfig.c4DefuseKitTime : GameConfig.c4DefuseTime;
+                bot.defuseProgress += dt / defTime;
+                if (bot.defuseProgress >= 1) {
+                  this.c4.defused = true;
+                  this.endRound('CT', `${bot.name} successfully defused the C4 bomb!`);
+                  return;
+                }
+                continue; // Stay defusing
+              } else {
+                bot.isDefusing = false;
+                // Run directly to bomb
+                bot.targetAngle = Math.atan2(this.c4.y - bot.y, this.c4.x - bot.x);
+                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 8 * dt);
+                bot.x += Math.cos(bot.angle) * bot.speed * dt;
+                bot.y += Math.sin(bot.angle) * bot.speed * dt;
+                this.resolveCollision(bot);
+                continue;
+              }
+            }
+          }
+
+          // T Bot Dropped C4 Pickup
+          if (droppedC4 && bot.team === 'Team_Bravo' && !bot.hasC4 && !this.c4.planted) {
+            const dC4 = Math.hypot(droppedC4.x - bot.x, droppedC4.y - bot.y);
+            if (dC4 < 32) {
+              bot.hasC4 = true;
+              this.droppedItems = this.droppedItems.filter(it => it !== droppedC4);
+              SoundFx.playDefuseTick();
+            } else if (!closestEnemy) {
+              bot.targetAngle = Math.atan2(droppedC4.y - bot.y, droppedC4.x - bot.x);
+              bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
+              bot.x += Math.cos(bot.angle) * bot.speed * dt;
+              bot.y += Math.sin(bot.angle) * bot.speed * dt;
+              this.resolveCollision(bot);
+              continue;
+            }
+          }
+
+          // T Bot Planting Logic
           if (bot.hasC4 && !this.c4.planted) {
             const targetSite = GameConfig.sites.A;
             const distToSite = Math.hypot(targetSite.x - bot.x, targetSite.y - bot.y);
             if (distToSite < targetSite.radius - 20) {
-              // Plant Bomb!
               bot.plantingProgress += dt;
               if (bot.plantingProgress >= GameConfig.c4PlantTime) {
                 bot.hasC4 = false;
@@ -877,11 +1108,10 @@
                 this.c4.x = bot.x; this.c4.y = bot.y;
                 this.c4.timer = GameConfig.c4FuseSeconds;
                 SoundFx.playCash();
-                this.addNoisePing(bot.x, bot.y, 600);
+                this.addNoisePing(bot.x, bot.y, 600, 'Team_Bravo');
               }
               continue;
-            } else if (!hasSight) {
-              // Move directly towards Site A to plant
+            } else if (!closestEnemy) {
               bot.targetAngle = Math.atan2(targetSite.y - bot.y, targetSite.x - bot.x);
               bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
               bot.x += Math.cos(bot.angle) * bot.speed * dt;
@@ -891,16 +1121,13 @@
             }
           }
 
-          // Combat AI
-          if (hasSight) {
-            if (distToPlayer <= 350) {
-              bot.state = 'Shoot';
-            } else {
-              bot.state = 'Chase';
-            }
-          } else if (bot.lastKnownPlayerPos) {
-            if (Math.hypot(bot.lastKnownPlayerPos.x - bot.x, bot.lastKnownPlayerPos.y - bot.y) < 45) {
-              bot.lastKnownPlayerPos = null; bot.state = 'Patrol';
+          // 3. Combat AI vs Squad Orders
+          if (closestEnemy) {
+            if (closestDist <= 380) bot.state = 'Shoot';
+            else bot.state = 'Chase';
+          } else if (bot.lastKnownEnemyPos) {
+            if (Math.hypot(bot.lastKnownEnemyPos.x - bot.x, bot.lastKnownEnemyPos.y - bot.y) < 45) {
+              bot.lastKnownEnemyPos = null; bot.state = 'Patrol';
             } else {
               bot.state = 'Chase';
             }
@@ -908,41 +1135,81 @@
             bot.state = 'Patrol';
           }
 
-          if (bot.state === 'Shoot') {
-            bot.targetAngle = Math.atan2(this.player.y - bot.y, this.player.x - bot.x);
+          if (bot.state === 'Shoot' && closestEnemy) {
+            bot.targetAngle = Math.atan2(closestEnemy.y - bot.y, closestEnemy.x - bot.x);
             bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 10 * dt);
+
             const now = performance.now();
             if (now - bot.lastShotTime >= bot.weaponStats.fireRate) {
-              bot.lastShotTime = now;
-              const a = bot.angle + (Math.random() - 0.5) * bot.shootInaccuracy;
-              this.bullets.push({
-                x: bot.x + Math.cos(a) * 22, y: bot.y + Math.sin(a) * 22,
-                vx: Math.cos(a) * bot.weaponStats.bulletSpeed, vy: Math.sin(a) * bot.weaponStats.bulletSpeed,
-                damage: bot.weaponStats.damage, isPlayer: false, life: 2.0
-              });
-              SoundFx.playShot(bot.weaponStats.id);
+              // LINE OF FIRE CAUTION: Check if teammates are in trajectory!
+              if (this.checkLineOfFireClear(bot, bot.angle, closestDist)) {
+                bot.lastShotTime = now;
+                const a = bot.angle + (Math.random() - 0.5) * bot.shootInaccuracy;
+                this.bullets.push({
+                  x: bot.x + Math.cos(a) * 22, y: bot.y + Math.sin(a) * 22,
+                  vx: Math.cos(a) * bot.weaponStats.bulletSpeed, vy: Math.sin(a) * bot.weaponStats.bulletSpeed,
+                  damage: bot.weaponStats.damage, team: bot.team, shooterId: bot.id, life: 2.0
+                });
+                SoundFx.playShot(bot.weaponStats.id);
+                this.addNoisePing(bot.x, bot.y, 450, bot.team);
+              }
             }
           } else if (bot.state === 'Chase') {
-            const dest = bot.lastKnownPlayerPos || this.player;
-            bot.targetAngle = Math.atan2(dest.y - bot.y, dest.x - bot.x);
-            bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
-            bot.x += Math.cos(bot.angle) * bot.speed * dt;
-            bot.y += Math.sin(bot.angle) * bot.speed * dt;
-            this.resolveCollision(bot);
-          } else {
-            bot.stateTimer -= dt;
-            if (bot.stateTimer <= 0) {
-              bot.stateTimer = 1.5 + Math.random() * 2;
-              const a = Math.random() * Math.PI * 2;
-              bot.patrolDir = { x: Math.cos(a), y: Math.sin(a) };
+            const dest = bot.lastKnownEnemyPos || closestEnemy;
+            if (dest) {
+              bot.targetAngle = Math.atan2(dest.y - bot.y, dest.x - bot.x);
+              bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
+              bot.x += Math.cos(bot.angle) * bot.speed * dt;
+              bot.y += Math.sin(bot.angle) * bot.speed * dt;
+              this.resolveCollision(bot);
             }
-            bot.targetAngle = Math.atan2(bot.patrolDir.y, bot.patrolDir.x);
-            bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 4 * dt);
-            const nx = bot.x + bot.patrolDir.x * (bot.speed * 0.65) * dt;
-            const ny = bot.y + bot.patrolDir.y * (bot.speed * 0.65) * dt;
-            if (this.isSolid(nx + bot.patrolDir.x * 20, ny + bot.patrolDir.y * 20)) bot.stateTimer = 0;
-            else { bot.x = nx; bot.y = ny; }
-            this.resolveCollision(bot);
+          } else {
+            // Patrol / Squad Radio Orders (for friendly CT bots)
+            if (bot.team === 'Team_Alpha' && bot.squadOrder && bot.squadOrder !== 'spread') {
+              let tx = bot.x, ty = bot.y, needMove = false;
+              if (bot.squadOrder === 'follow') {
+                const offAngle = (bIdx * 0.7) + Math.PI;
+                tx = this.player.x + Math.cos(offAngle) * 55;
+                ty = this.player.y + Math.sin(offAngle) * 55;
+                needMove = Math.hypot(tx - bot.x, ty - bot.y) > 28;
+              } else if (bot.squadOrder === 'hold') {
+                if (bot.holdPosition) {
+                  tx = bot.holdPosition.x; ty = bot.holdPosition.y;
+                  needMove = Math.hypot(tx - bot.x, ty - bot.y) > 16;
+                }
+              } else if (bot.squadOrder === 'site_a') {
+                tx = GameConfig.sites.A.x; ty = GameConfig.sites.A.y;
+                needMove = Math.hypot(tx - bot.x, ty - bot.y) > 40;
+              } else if (bot.squadOrder === 'site_b') {
+                tx = GameConfig.sites.B.x; ty = GameConfig.sites.B.y;
+                needMove = Math.hypot(tx - bot.x, ty - bot.y) > 40;
+              }
+
+              if (needMove) {
+                bot.targetAngle = Math.atan2(ty - bot.y, tx - bot.x);
+                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
+                bot.x += Math.cos(bot.angle) * bot.speed * dt;
+                bot.y += Math.sin(bot.angle) * bot.speed * dt;
+                this.resolveCollision(bot);
+              } else {
+                bot.angle = this.smoothRot(bot.angle, this.player.angle, 3 * dt);
+              }
+            } else {
+              // Default patrol behavior
+              bot.stateTimer -= dt;
+              if (bot.stateTimer <= 0) {
+                bot.stateTimer = 1.5 + Math.random() * 2;
+                const a = Math.random() * Math.PI * 2;
+                bot.patrolDir = { x: Math.cos(a), y: Math.sin(a) };
+              }
+              bot.targetAngle = Math.atan2(bot.patrolDir.y, bot.patrolDir.x);
+              bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 4 * dt);
+              const nx = bot.x + bot.patrolDir.x * (bot.speed * 0.65) * dt;
+              const ny = bot.y + bot.patrolDir.y * (bot.speed * 0.65) * dt;
+              if (this.isSolid(nx + bot.patrolDir.x * 20, ny + bot.patrolDir.y * 20)) bot.stateTimer = 0;
+              else { bot.x = nx; bot.y = ny; }
+              this.resolveCollision(bot);
+            }
           }
         }
       }
@@ -1062,10 +1329,18 @@
           promptEl.style.display = showPrompt ? 'flex' : 'none';
         }
 
-        // 3. Camera Tracking
-        const lead = 0.12;
-        const targetX = this.player.x + (this.mouse.worldX - this.player.x) * lead;
-        const targetY = this.player.y + (this.mouse.worldY - this.player.y) * lead;
+        // 3. Camera Tracking (Focus player or spectate alive CT teammates)
+        let camFocusX = this.player.x, camFocusY = this.player.y;
+        if (this.player.hp <= 0) {
+          const aliveTeammate = this.bots.find(b => b.team === 'Team_Alpha' && b.hp > 0);
+          if (aliveTeammate) {
+            camFocusX = aliveTeammate.x;
+            camFocusY = aliveTeammate.y;
+          }
+        }
+        const lead = this.player.hp > 0 ? 0.12 : 0;
+        const targetX = camFocusX + (this.mouse.worldX - camFocusX) * lead;
+        const targetY = camFocusY + (this.mouse.worldY - camFocusY) * lead;
         this.camera.x += (targetX - this.camera.x) * (8 * dt);
         this.camera.y += (targetY - this.camera.y) * (8 * dt);
 
@@ -1114,37 +1389,59 @@
           }
 
           let hit = false;
-          if (b.isPlayer) {
+          if (b.team === 'Team_Alpha') {
             for (const bot of this.bots) {
-              if (bot.hp <= 0) continue;
+              if (bot.hp <= 0 || bot.team !== 'Team_Bravo') continue;
               if (Math.hypot(bot.x - nx, bot.y - ny) < bot.radius + 3) {
                 this.applyDamage(bot, b.damage, bot.profile);
                 this.spawnSparks(nx, ny, '#ef4444', 6);
                 hit = true;
                 if (bot.hp <= 0) {
                   const reward = b.killReward || 300;
-                  this.playerProfile.cash = Math.min(GameConfig.maxCash, this.playerProfile.cash + reward);
-                  this.playerProfile.roundKills++; this.playerProfile.roundKillEarnings += reward;
-                  SoundFx.playCash();
-                  // Drop bot's carried weapon
+                  if (b.shooterId === 'player') {
+                    this.playerProfile.cash = Math.min(GameConfig.maxCash, this.playerProfile.cash + reward);
+                    this.playerProfile.roundKills++; this.playerProfile.roundKillEarnings += reward;
+                    SoundFx.playCash();
+                  } else {
+                    const shooterBot = this.bots.find(sb => sb.id === b.shooterId);
+                    if (shooterBot && shooterBot.profile) {
+                      shooterBot.profile.cash = Math.min(GameConfig.maxCash, shooterBot.profile.cash + reward);
+                    }
+                  }
                   this.droppedItems.push({ x: bot.x, y: bot.y, weaponId: bot.equippedWeapon, ammo: bot.weaponStats.magSize, type: 'weapon' });
-                  // Drop C4 if carrier
                   if (bot.hasC4 && !this.c4.planted) {
                     bot.hasC4 = false;
                     this.droppedItems.push({ x: bot.x, y: bot.y, type: 'c4' });
                   }
+                  this.handleTradeKills(bot, (b.shooterId === 'player') ? this.player : this.bots.find(sb => sb.id === b.shooterId));
                 }
                 break;
               }
             }
-          } else {
+          } else if (b.team === 'Team_Bravo') {
             if (this.player && this.player.hp > 0 && Math.hypot(this.player.x - nx, this.player.y - ny) < this.player.radius + 3) {
               this.applyDamage(this.player, b.damage, this.playerProfile);
               this.spawnSparks(nx, ny, '#38bdf8', 6);
               hit = true;
               this.updateHUD();
               if (this.player.hp <= 0) {
-                this.endRound('T', 'Operative eliminated in combat.');
+                const shooterBot = this.bots.find(sb => sb.id === b.shooterId);
+                this.handleTradeKills(this.player, shooterBot);
+              }
+            } else {
+              for (const bot of this.bots) {
+                if (bot.hp <= 0 || bot.team !== 'Team_Alpha') continue;
+                if (Math.hypot(bot.x - nx, bot.y - ny) < bot.radius + 3) {
+                  this.applyDamage(bot, b.damage, bot.profile);
+                  this.spawnSparks(nx, ny, '#38bdf8', 6);
+                  hit = true;
+                  if (bot.hp <= 0) {
+                    this.droppedItems.push({ x: bot.x, y: bot.y, weaponId: bot.equippedWeapon, ammo: bot.weaponStats.magSize, type: 'weapon' });
+                    const shooterBot = this.bots.find(sb => sb.id === b.shooterId);
+                    this.handleTradeKills(bot, shooterBot);
+                  }
+                  break;
+                }
               }
             }
           }
@@ -1152,11 +1449,15 @@
           b.x = nx; b.y = ny;
         }
 
-        // 9. Check Victory if All Bots Dead (And bomb not ticking)
+        // 9. Check Victory
         if (this.roundState === 'ACTIVE') {
-          const alive = this.bots.filter(b => b.hp > 0).length;
-          if (alive === 0 && (!this.c4 || !this.c4.planted)) {
-            this.endRound('CT', 'All hostile bots eliminated. Sector secured.');
+          const aliveT = this.bots.filter(b => b.team === 'Team_Bravo' && b.hp > 0).length;
+          const aliveCT = (this.player && this.player.hp > 0 ? 1 : 0) + this.bots.filter(b => b.team === 'Team_Alpha' && b.hp > 0).length;
+
+          if (aliveT === 0 && (!this.c4 || !this.c4.planted)) {
+            this.endRound('CT', 'All hostile Terrorists eliminated. Sector secured.');
+          } else if (aliveCT === 0 && (!this.c4 || !this.c4.defused)) {
+            this.endRound('T', 'Entire Counter-Terrorist squad eliminated.');
           }
         }
 
@@ -1275,28 +1576,73 @@
           ctx.beginPath(); ctx.arc(g.x, g.y, 4, 0, Math.PI * 2); ctx.fill();
         }
 
-        // 6. Bots (Rendered if in LoS)
+        // 6. Bots (Friendly Teammates & Enemies)
         for (const bot of this.bots) {
           if (bot.hp <= 0) continue;
-          if (GameConfig.fogOfWarEnabled && !this.hasLoS(this.player.x, this.player.y, bot.x, bot.y)) continue;
+          const isFriendly = (bot.team === 'Team_Alpha');
+          // Enemies hidden by fog of war unless in LoS
+          if (!isFriendly && GameConfig.fogOfWarEnabled && !this.hasLoS(this.player.x, this.player.y, bot.x, bot.y)) continue;
 
           ctx.save(); ctx.translate(bot.x, bot.y); ctx.rotate(bot.angle);
-          ctx.fillStyle = bot.hasC4 ? '#f59e0b' : '#dc2626'; // C4 carrier highlighted orange
-          ctx.beginPath(); ctx.arc(0, 0, bot.radius, 0, Math.PI * 2); ctx.fill();
-          ctx.lineWidth = 2.5; ctx.strokeStyle = '#991b1b'; ctx.stroke();
 
-          if (bot.profile.armor > 0) {
-            ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(0, 0, bot.radius + 2, 0, Math.PI * 2); ctx.stroke();
+          if (isFriendly) {
+            // Friendly CT Operative (Green/Cyan tactical colors)
+            ctx.fillStyle = '#059669'; // Emerald CT armor
+            ctx.beginPath(); ctx.arc(0, 0, bot.radius, 0, Math.PI * 2); ctx.fill();
+            ctx.lineWidth = 2.5; ctx.strokeStyle = '#34d399'; ctx.stroke();
+
+            if (bot.profile.armor > 0) {
+              ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.arc(0, 0, bot.radius + 2, 0, Math.PI * 2); ctx.stroke();
+            }
+
+            // Gun barrel
+            ctx.strokeStyle = '#6ee7b7'; ctx.lineWidth = 3.5;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(bot.radius + 10, 0); ctx.stroke();
+          } else {
+            // Hostile T Operative (Red/Crimson)
+            ctx.fillStyle = bot.hasC4 ? '#f59e0b' : '#dc2626';
+            ctx.beginPath(); ctx.arc(0, 0, bot.radius, 0, Math.PI * 2); ctx.fill();
+            ctx.lineWidth = 2.5; ctx.strokeStyle = '#991b1b'; ctx.stroke();
+
+            if (bot.profile.armor > 0) {
+              ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.arc(0, 0, bot.radius + 2, 0, Math.PI * 2); ctx.stroke();
+            }
+
+            ctx.strokeStyle = '#f87171'; ctx.lineWidth = 3.5;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(bot.radius + 10, 0); ctx.stroke();
           }
-
-          ctx.strokeStyle = '#f87171'; ctx.lineWidth = 3.5;
-          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(bot.radius + 10, 0); ctx.stroke();
           ctx.restore();
 
-          // HP Bar
-          ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(bot.x - 14, bot.y - 26, 28, 4);
-          ctx.fillStyle = '#ef4444'; ctx.fillRect(bot.x - 14, bot.y - 26, 28 * Math.max(0, bot.hp / bot.maxHp), 4);
+          // Overhead HUD Indicators (Names & Mini Health Bar)
+          if (isFriendly) {
+            // Name tag
+            ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = '#34d399';
+            ctx.fillText(bot.name, bot.x, bot.y - 32);
+
+            // Mini HP Bar (Green)
+            ctx.fillStyle = 'rgba(15,23,42,0.85)'; ctx.fillRect(bot.x - 14, bot.y - 28, 28, 4);
+            ctx.fillStyle = '#10b981'; ctx.fillRect(bot.x - 14, bot.y - 28, 28 * Math.max(0, bot.hp / bot.maxHp), 4);
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(bot.x - 14, bot.y - 28, 28, 4);
+
+            // Defuse Indicator
+            if (bot.isDefusing) {
+              ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 8px monospace';
+              ctx.fillText('DEFUSING...', bot.x, bot.y - 39);
+              ctx.fillStyle = '#1e293b'; ctx.fillRect(bot.x - 16, bot.y - 48, 32, 4);
+              ctx.fillStyle = '#38bdf8'; ctx.fillRect(bot.x - 16, bot.y - 48, 32 * Math.min(1, bot.defuseProgress), 4);
+            }
+          } else {
+            // Hostile Health Bar (Red)
+            ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(bot.x - 14, bot.y - 26, 28, 4);
+            ctx.fillStyle = '#ef4444'; ctx.fillRect(bot.x - 14, bot.y - 26, 28 * Math.max(0, bot.hp / bot.maxHp), 4);
+            if (bot.hasC4) {
+              ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+              ctx.fillStyle = '#fbbf24'; ctx.fillText('C4 CARRIER', bot.x, bot.y - 31);
+            }
+          }
         }
 
         // 7. Player
@@ -1370,15 +1716,19 @@
           fCtx.fillStyle = 'rgba(8, 12, 20, 0.88)';
           fCtx.fillRect(0, 0, this.worldWidth, this.worldHeight);
 
+          const eye = (this.player.hp > 0)
+            ? this.player
+            : (this.bots.find(b => b.team === 'Team_Alpha' && b.hp > 0) || this.player);
+
           fCtx.save();
           fCtx.globalCompositeOperation = 'destination-out';
-          fCtx.beginPath(); fCtx.moveTo(this.player.x, this.player.y);
+          fCtx.beginPath(); fCtx.moveTo(eye.x, eye.y);
           const numRays = 180;
           for (let a = 0; a < Math.PI * 2; a += (Math.PI * 2) / numRays) {
-            let dist = 0, hitX = this.player.x, hitY = this.player.y;
+            let dist = 0, hitX = eye.x, hitY = eye.y;
             const cos = Math.cos(a), sin = Math.sin(a);
             while (dist < 950) {
-              dist += 14; const px = this.player.x + cos * dist, py = this.player.y + sin * dist;
+              dist += 14; const px = eye.x + cos * dist, py = eye.y + sin * dist;
               if (this.isSolid(px, py)) { hitX = px; hitY = py; break; }
               // Smoke blocks raycasting!
               let inSmoke = false;
@@ -1392,9 +1742,9 @@
           }
           fCtx.closePath(); fCtx.fill();
 
-          const amb = fCtx.createRadialGradient(this.player.x, this.player.y, 20, this.player.x, this.player.y, 110);
+          const amb = fCtx.createRadialGradient(eye.x, eye.y, 20, eye.x, eye.y, 110);
           amb.addColorStop(0, 'rgba(0,0,0,1)'); amb.addColorStop(1, 'rgba(0,0,0,0)');
-          fCtx.fillStyle = amb; fCtx.beginPath(); fCtx.arc(this.player.x, this.player.y, 110, 0, Math.PI * 2); fCtx.fill();
+          fCtx.fillStyle = amb; fCtx.beginPath(); fCtx.arc(eye.x, eye.y, 110, 0, Math.PI * 2); fCtx.fill();
           fCtx.restore();
 
           ctx.drawImage(this.fogCanvas, 0, 0);
@@ -1463,17 +1813,29 @@
           rCtx.beginPath(); rCtx.arc(offX + this.c4.x * sX, offY + this.c4.y * sY, 3.5, 0, Math.PI * 2); rCtx.fill();
         }
 
-        // Spotted Enemies
+        // Friendly Teammates (Always tracked on tactical radar)
         for (const bot of this.bots) {
-          if (bot.hp <= 0) continue;
-          if (!GameConfig.fogOfWarEnabled || this.hasLoS(this.player.x, this.player.y, bot.x, bot.y)) {
+          if (bot.hp <= 0 || bot.team !== 'Team_Alpha') continue;
+          const bx = offX + bot.x * sX, by = offY + bot.y * sY;
+          rCtx.fillStyle = '#34d399';
+          rCtx.beginPath(); rCtx.arc(bx, by, 3, 0, Math.PI * 2); rCtx.fill();
+        }
+
+        // Hostiles (Rendered when spotted by player or any CT teammate)
+        for (const bot of this.bots) {
+          if (bot.hp <= 0 || bot.team !== 'Team_Bravo') continue;
+          const spotted = !GameConfig.fogOfWarEnabled ||
+            this.hasLoS(this.player.x, this.player.y, bot.x, bot.y) ||
+            this.bots.some(fb => fb.team === 'Team_Alpha' && fb.hp > 0 && this.hasLoS(fb.x, fb.y, bot.x, bot.y));
+
+          if (spotted) {
             rCtx.fillStyle = bot.hasC4 ? '#f59e0b' : '#ef4444';
             rCtx.beginPath(); rCtx.arc(offX + bot.x * sX, offY + bot.y * sY, 3, 0, Math.PI * 2); rCtx.fill();
           }
         }
 
         // Player
-        if (this.player) {
+        if (this.player && this.player.hp > 0) {
           const px = offX + this.player.x * sX, py = offY + this.player.y * sY;
           rCtx.fillStyle = '#38bdf8'; rCtx.beginPath(); rCtx.arc(px, py, 3.5, 0, Math.PI * 2); rCtx.fill();
           rCtx.strokeStyle = '#bae6fd'; rCtx.lineWidth = 1.5;
@@ -1489,6 +1851,11 @@
         if (!this.player) return;
         document.getElementById('score-ct').innerText = this.scoreCT;
         document.getElementById('score-t').innerText = this.scoreT;
+
+        const aliveCT = (this.player.hp > 0 ? 1 : 0) + this.bots.filter(b => b.team === 'Team_Alpha' && b.hp > 0).length;
+        const aliveT = this.bots.filter(b => b.team === 'Team_Bravo' && b.hp > 0).length;
+        const aliveEl = document.getElementById('alive-counts');
+        if (aliveEl) aliveEl.innerText = `(${aliveCT} vs ${aliveT})`;
 
         const clockEl = document.getElementById('hud-clock'), phaseEl = document.getElementById('hud-phase-label');
         const skipBtn = document.getElementById('btn-skip-buy');
