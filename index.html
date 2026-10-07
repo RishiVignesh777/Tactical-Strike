@@ -356,6 +356,8 @@
         this.keys = {};
         this.mouse = { screenX: 0, screenY: 0, worldX: 0, worldY: 0, isDown: false };
         this.isAimingAtEnemy = false;
+        this.isAimingAtFriendly = false;
+        this.aimedFriendlyName = '';
 
         // Scoreboard & Round cycle
         this.scoreCT = 0; this.scoreT = 0; this.ctLossStreak = 0; this.tLossStreak = 0;
@@ -902,37 +904,90 @@
       }
 
       /* =========================================================================
-         AUTO-SHOOT TARGET LOCKING
+         AUTO-SHOOT & FRIENDLY PROTECTION
          ========================================================================= */
-      checkAutoShoot() {
-        if (!this.player || this.roundState !== 'ACTIVE' || this.isBuyMenuOpen || this.playerFlashAlpha > 0.4) {
-          this.isAimingAtEnemy = false; return;
-        }
-        let found = false;
-        for (const bot of this.bots) {
-          if (bot.hp <= 0) continue;
-          if (!this.hasLoS(this.player.x, this.player.y, bot.x, bot.y)) continue;
-          const dist = Math.hypot(bot.x - this.player.x, bot.y - this.player.y);
-          if (dist > 950) continue;
+      isPlayerAimingAtFriendly() {
+        if (!this.player || this.player.hp <= 0) return null;
+        const cos = Math.cos(this.player.angle), sin = Math.sin(this.player.angle);
 
-          // Proximity or Aim ray intersection
-          if (Math.hypot(this.mouse.worldX - bot.x, this.mouse.worldY - bot.y) <= bot.radius + 14) { found = true; break; }
-          const cos = Math.cos(this.player.angle), sin = Math.sin(this.player.angle);
+        for (const bot of this.bots) {
+          if (bot.hp <= 0 || bot.team !== 'Team_Alpha') continue;
+
+          // 1. Mouse cursor directly hovering over friendly teammate
+          if (Math.hypot(this.mouse.worldX - bot.x, this.mouse.worldY - bot.y) <= bot.radius + 16) {
+            return bot;
+          }
+
+          // 2. Weapon aim ray pointing directly toward friendly teammate
           const toX = bot.x - this.player.x, toY = bot.y - this.player.y;
           const proj = toX * cos + toY * sin;
           if (proj > 0 && proj < 950) {
             const perpSq = (toX * toX + toY * toY) - (proj * proj);
-            if (perpSq <= (bot.radius + 12) * (bot.radius + 12)) { found = true; break; }
+            if (perpSq <= (bot.radius + 14) * (bot.radius + 14)) {
+              return bot;
+            }
           }
         }
-        this.isAimingAtEnemy = found;
-        if (found && GameConfig.autoShootEnabled && this.playerProfile.activeSlot !== 'grenade') {
+        return null;
+      }
+
+      checkAutoShoot() {
+        if (!this.player || this.player.hp <= 0 || this.roundState !== 'ACTIVE' || this.isBuyMenuOpen || this.playerFlashAlpha > 0.4) {
+          this.isAimingAtEnemy = false;
+          this.isAimingAtFriendly = false;
+          this.aimedFriendlyName = '';
+          return;
+        }
+
+        // 1. Never shoot or lock on friendly teammates!
+        const friendlyBot = this.isPlayerAimingAtFriendly();
+        if (friendlyBot) {
+          this.isAimingAtFriendly = true;
+          this.aimedFriendlyName = friendlyBot.name || 'Teammate';
+          this.isAimingAtEnemy = false;
+          return; // DO NOT AUTO-SHOOT AT FRIENDLY BOTS
+        }
+        this.isAimingAtFriendly = false;
+        this.aimedFriendlyName = '';
+
+        // 2. Lock onto hostile enemies ONLY (Team_Bravo)
+        let foundEnemy = false;
+        const cos = Math.cos(this.player.angle), sin = Math.sin(this.player.angle);
+
+        for (const bot of this.bots) {
+          if (bot.hp <= 0 || bot.team !== 'Team_Bravo') continue;
+          if (!this.hasLoS(this.player.x, this.player.y, bot.x, bot.y)) continue;
+          const dist = Math.hypot(bot.x - this.player.x, bot.y - this.player.y);
+          if (dist > 950) continue;
+
+          // Proximity or Aim ray intersection with hostile
+          if (Math.hypot(this.mouse.worldX - bot.x, this.mouse.worldY - bot.y) <= bot.radius + 14) {
+            foundEnemy = true;
+            break;
+          }
+          const toX = bot.x - this.player.x, toY = bot.y - this.player.y;
+          const proj = toX * cos + toY * sin;
+          if (proj > 0 && proj < 950) {
+            const perpSq = (toX * toX + toY * toY) - (proj * proj);
+            if (perpSq <= (bot.radius + 12) * (bot.radius + 12)) {
+              foundEnemy = true;
+              break;
+            }
+          }
+        }
+
+        this.isAimingAtEnemy = foundEnemy;
+
+        if (foundEnemy && GameConfig.autoShootEnabled && this.playerProfile.activeSlot !== 'grenade') {
           this.tryPlayerShoot();
         }
       }
 
       tryPlayerShoot() {
         if (!this.player || this.roundState !== 'ACTIVE' || this.player.isReloading) return;
+        // Cease fire if aiming at a friendly teammate
+        if (this.isPlayerAimingAtFriendly()) return;
+
         const now = performance.now(), stats = this.player.weaponStats;
         if (now - this.player.lastShotTime < stats.fireRate) return;
         if (this.player.currentAmmo <= 0) { this.player.startReload(); return; }
@@ -1650,7 +1705,7 @@
           ctx.save(); ctx.translate(this.player.x, this.player.y); ctx.rotate(this.player.angle);
           // Flashlight beam
           const flashGrad = ctx.createRadialGradient(0, 0, 10, 160, 0, 220);
-          flashGrad.addColorStop(0, this.isAimingAtEnemy ? 'rgba(239, 68, 68, 0.28)' : 'rgba(56, 189, 248, 0.22)');
+          flashGrad.addColorStop(0, this.isAimingAtEnemy ? 'rgba(239, 68, 68, 0.28)' : (this.isAimingAtFriendly ? 'rgba(16, 185, 129, 0.25)' : 'rgba(56, 189, 248, 0.22)'));
           flashGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
           ctx.fillStyle = flashGrad;
           ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 320, -0.38, 0.38); ctx.closePath(); ctx.fill();
@@ -1663,7 +1718,7 @@
             ctx.beginPath(); ctx.arc(0, 0, this.player.radius + 3, 0, Math.PI * 2); ctx.stroke();
           }
 
-          ctx.strokeStyle = this.isAimingAtEnemy ? '#ef4444' : '#e0f2fe'; ctx.lineWidth = 4;
+          ctx.strokeStyle = this.isAimingAtEnemy ? '#ef4444' : (this.isAimingAtFriendly ? '#10b981' : '#e0f2fe'); ctx.lineWidth = 4;
           ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(this.player.radius + 12, 0); ctx.stroke();
           ctx.restore();
         }
@@ -1758,10 +1813,23 @@
       }
 
       renderCrosshair(ctx) {
-        const mx = this.mouse.screenX, my = this.mouse.screenY, locked = this.isAimingAtEnemy;
+        const mx = this.mouse.screenX, my = this.mouse.screenY;
+        const lockedEnemy = this.isAimingAtEnemy;
+        const aimedFriendly = this.isAimingAtFriendly;
         const spread = this.player ? this.player.recoilAngle * 1.5 : 0, gap = 5 + spread, len = 7;
-        ctx.strokeStyle = locked ? '#ef4444' : 'rgba(56, 189, 248, 0.85)';
-        ctx.lineWidth = locked ? 2.4 : 1.8;
+
+        let strokeColor = 'rgba(56, 189, 248, 0.85)';
+        let centerColor = '#38bdf8';
+        if (lockedEnemy) {
+          strokeColor = '#ef4444';
+          centerColor = '#ef4444';
+        } else if (aimedFriendly) {
+          strokeColor = '#10b981';
+          centerColor = '#10b981';
+        }
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = (lockedEnemy || aimedFriendly) ? 2.4 : 1.8;
         ctx.beginPath();
         ctx.moveTo(mx, my - gap); ctx.lineTo(mx, my - gap - len);
         ctx.moveTo(mx, my + gap); ctx.lineTo(mx, my + gap + len);
@@ -1769,11 +1837,18 @@
         ctx.moveTo(mx + gap, my); ctx.lineTo(mx + gap + len, my);
         ctx.stroke();
 
-        ctx.fillStyle = locked ? '#ef4444' : '#38bdf8';
-        ctx.beginPath(); ctx.arc(mx, my, locked ? 2.5 : 1.8, 0, Math.PI * 2); ctx.fill();
-        if (locked) {
+        ctx.fillStyle = centerColor;
+        ctx.beginPath(); ctx.arc(mx, my, (lockedEnemy || aimedFriendly) ? 2.5 : 1.8, 0, Math.PI * 2); ctx.fill();
+
+        if (lockedEnemy) {
           ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; ctx.lineWidth = 1.4;
           ctx.beginPath(); ctx.arc(mx, my, gap + 9, 0, Math.PI * 2); ctx.stroke();
+        } else if (aimedFriendly) {
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.7)'; ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(mx, my, gap + 9, 0, Math.PI * 2); ctx.stroke();
+          ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+          ctx.fillStyle = '#34d399';
+          ctx.fillText(`TEAMMATE (${this.aimedFriendlyName || 'CT'})`, mx, my + gap + 20);
         }
       }
 
