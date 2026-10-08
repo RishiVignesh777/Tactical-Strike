@@ -1452,17 +1452,18 @@
         // Tactical Routes
         const tRoutes = [
           ['t_spawn', 'long_t', 'long_doors', 'long_a', 'a_site'], // 1. Rush Long A
-          ['t_spawn', 'long_t', 'long_doors', 'pit', 'long_a'],    // 2. Long A Pit Support
-          ['t_spawn', 't_mid', 'mid_doors', 'catwalk', 'short_a', 'a_site'], // 3. Mid to Short
+          ['t_spawn', 'long_t', 'long_doors', 'pit', 'long_a', 'a_site'], // 2. Long A Pit Support & Site Push
+          ['t_spawn', 't_mid', 'mid_doors', 'catwalk', 'short_a', 'a_site'], // 3. Mid to Short A
           ['t_spawn', 'outside_tunnels', 'b_tunnels', 'b_site'],   // 4. Rush B Tunnels
           ['t_spawn', 't_mid', 'mid_doors', 'top_mid', 'b_doors', 'b_site']  // 5. Mid to B Split
         ];
 
+        // Counter-Terrorists Tactical Offensive / Hunting Routes (Pushing actively into lanes instead of camping)
         const ctDefenseRoutes = [
-          ['ct_spawn', 'a_site', 'long_a'],     // Hold Long A
-          ['ct_spawn', 'a_site', 'short_a'],    // Hold Short A
-          ['ct_spawn', 'top_mid', 'mid_doors'], // Hold Mid Doors
-          ['ct_spawn', 'b_doors', 'b_site']     // Hold B Site
+          ['ct_spawn', 'a_site', 'long_a', 'long_doors', 'long_t'],     // Attack Long A & Push to T-Side
+          ['ct_spawn', 'short_a', 'catwalk', 'mid_doors', 't_mid'],      // Push Short A through Catwalk to T-Mid
+          ['ct_spawn', 'top_mid', 'mid_doors', 't_mid', 't_spawn'],      // Aggressive Mid Push to T Spawn
+          ['ct_spawn', 'b_doors', 'b_site', 'b_tunnels', 'outside_tunnels'] // Clear B Site & Push into B Tunnels
         ];
 
         // 1. Spawn Friendly CT Bots around CT Spawn
@@ -1486,14 +1487,16 @@
             lastKnownEnemyPos: null, targetEnemy: null,
             squadOrder: this.currentSquadOrder, holdPosition: null,
             route: assignedRoute, routeIndex: 0,
+            pathNodes: [], pathTargetPos: null,
             equippedWeapon: bKey, weaponStats: { ...bStats }, currentAmmo: bStats.magSize,
             isReloading: false, reloadTimer: 0,
             lastShotTime: 0, shootInaccuracy: 0.10,
             hasC4: false, plantingProgress: 0, isDefusing: false, defuseProgress: 0,
-            hasDefuseKit: Math.random() < 0.5, flashTimer: 0,
+            hasDefuseKit: Math.random() < 0.65, flashTimer: 0,
             strafeDir: (Math.random() < 0.5 ? 1 : -1), strafeTimer: 0.5 + Math.random() * 0.5,
             scanTimer: 0.8 + Math.random() * 0.8, scanOffset: 0, scanBaseAngle: 0,
-            retakeInitialized: false, postPlantCoverPos: null
+            retakeInitialized: false, postPlantCoverPos: null,
+            tacticalCampPos: null, tacticalCampTimer: 0
           });
         }
 
@@ -1518,6 +1521,7 @@
             lastKnownEnemyPos: null, targetEnemy: null,
             squadOrder: 'spread', holdPosition: null,
             route: assignedRoute, routeIndex: 0,
+            pathNodes: [], pathTargetPos: null,
             equippedWeapon: bKey, weaponStats: { ...bStats }, currentAmmo: bStats.magSize,
             isReloading: false, reloadTimer: 0,
             lastShotTime: 0, shootInaccuracy: 0.10,
@@ -1525,7 +1529,8 @@
             hasDefuseKit: false, flashTimer: 0,
             strafeDir: (Math.random() < 0.5 ? 1 : -1), strafeTimer: 0.5 + Math.random() * 0.5,
             scanTimer: 0.8 + Math.random() * 0.8, scanOffset: 0, scanBaseAngle: -Math.PI / 2,
-            retakeInitialized: false, postPlantCoverPos: null
+            retakeInitialized: false, postPlantCoverPos: null,
+            tacticalCampPos: null, tacticalCampTimer: 0
           });
         }
 
@@ -1844,6 +1849,91 @@
         return bestCover;
       }
 
+      findPathAStar(startX, startY, goalX, goalY, maxSearchTiles = 400) {
+        const startC = Math.max(0, Math.min(this.cols - 1, Math.floor(startX / this.tileSize)));
+        const startR = Math.max(0, Math.min(this.rows - 1, Math.floor(startY / this.tileSize)));
+        const goalC = Math.max(0, Math.min(this.cols - 1, Math.floor(goalX / this.tileSize)));
+        const goalR = Math.max(0, Math.min(this.rows - 1, Math.floor(goalY / this.tileSize)));
+
+        if (startC === goalC && startR === goalR) return [];
+
+        const openSet = [];
+        const closedSet = new Uint8Array(this.rows * this.cols);
+        const cameFrom = new Int32Array(this.rows * this.cols).fill(-1);
+        const gScore = new Float32Array(this.rows * this.cols).fill(Infinity);
+
+        const startIdx = startR * this.cols + startC;
+        const goalIdx = goalR * this.cols + goalC;
+        gScore[startIdx] = 0;
+
+        const heuristic = (c, r) => Math.hypot(c - goalC, r - goalR);
+        openSet.push({ idx: startIdx, c: startC, r: startR, f: heuristic(startC, startR) });
+
+        let count = 0;
+        let reachedIdx = -1;
+
+        while (openSet.length > 0 && count++ < maxSearchTiles) {
+          // Find lowest f score in openSet
+          let bestI = 0;
+          for (let i = 1; i < openSet.length; i++) {
+            if (openSet[i].f < openSet[bestI].f) bestI = i;
+          }
+          const current = openSet.splice(bestI, 1)[0];
+          const curIdx = current.idx;
+
+          if (curIdx === goalIdx || (Math.abs(current.c - goalC) <= 1 && Math.abs(current.r - goalR) <= 1 && !this.isSolid((current.c + 0.5) * this.tileSize, (current.r + 0.5) * this.tileSize))) {
+            reachedIdx = curIdx;
+            break;
+          }
+
+          closedSet[curIdx] = 1;
+
+          // 4-directional cardinal neighbors
+          const neighbors = [
+            { c: current.c + 1, r: current.r },
+            { c: current.c - 1, r: current.r },
+            { c: current.c, r: current.r + 1 },
+            { c: current.c, r: current.r - 1 }
+          ];
+
+          for (const nb of neighbors) {
+            if (nb.c < 0 || nb.c >= this.cols || nb.r < 0 || nb.r >= this.rows) continue;
+            const nbIdx = nb.r * this.cols + nb.c;
+            if (closedSet[nbIdx] === 1) continue;
+            // Impassable wall or crate
+            const t = this.map[nb.r][nb.c];
+            if (t === 1 || t === 2) continue;
+
+            const tentativeG = gScore[curIdx] + 1;
+            if (tentativeG < gScore[nbIdx]) {
+              cameFrom[nbIdx] = curIdx;
+              gScore[nbIdx] = tentativeG;
+              const f = tentativeG + heuristic(nb.c, nb.r);
+              const existing = openSet.find(o => o.idx === nbIdx);
+              if (!existing) {
+                openSet.push({ idx: nbIdx, c: nb.c, r: nb.r, f: f });
+              } else {
+                existing.f = f;
+              }
+            }
+          }
+        }
+
+        if (reachedIdx === -1) return [];
+
+        // Reconstruct path backward
+        const path = [];
+        let curr = reachedIdx;
+        while (curr !== -1 && curr !== startIdx) {
+          const r = Math.floor(curr / this.cols);
+          const c = curr % this.cols;
+          path.unshift({ x: (c + 0.5) * this.tileSize, y: (r + 0.5) * this.tileSize });
+          curr = cameFrom[curr];
+        }
+
+        return path;
+      }
+
       applyDamage(target, raw, prof) {
         let dmg = raw;
         if (prof && prof.armor > 0) {
@@ -2022,12 +2112,77 @@
         return true;
       }
 
+      steerBotTowards(bot, targetX, targetY, dt, speedMultiplier = 1.0) {
+        if (!bot || bot.hp <= 0) return;
+        const distDirect = Math.hypot(targetX - bot.x, targetY - bot.y);
+        if (distDirect <= 12) return;
+
+        // If direct line of sight exists, run directly
+        if (this.hasLoS(bot.x, bot.y, targetX, targetY)) {
+          bot.pathNodes = [];
+          bot.targetAngle = Math.atan2(targetY - bot.y, targetX - bot.x);
+          bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 9 * dt);
+          bot.x += Math.cos(bot.angle) * (bot.speed * speedMultiplier) * dt;
+          bot.y += Math.sin(bot.angle) * (bot.speed * speedMultiplier) * dt;
+          this.resolveCollision(bot);
+          return;
+        }
+
+        // Check if we need to compute/recompute an A* path around obstacles
+        const targetMoved = !bot.pathTargetPos || Math.hypot(bot.pathTargetPos.x - targetX, bot.pathTargetPos.y - targetY) > 48;
+        if (!bot.pathNodes || bot.pathNodes.length === 0 || targetMoved) {
+          bot.pathTargetPos = { x: targetX, y: targetY };
+          bot.pathNodes = this.findPathAStar(bot.x, bot.y, targetX, targetY, 400);
+        }
+
+        if (bot.pathNodes && bot.pathNodes.length > 0) {
+          const nextNode = bot.pathNodes[0];
+          const dToNode = Math.hypot(nextNode.x - bot.x, nextNode.y - bot.y);
+          if (dToNode < 28) {
+            bot.pathNodes.shift();
+          }
+          if (bot.pathNodes.length > 0) {
+            const curGoal = bot.pathNodes[0];
+            bot.targetAngle = Math.atan2(curGoal.y - bot.y, curGoal.x - bot.x);
+            bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 8 * dt);
+            bot.x += Math.cos(bot.angle) * (bot.speed * speedMultiplier) * dt;
+            bot.y += Math.sin(bot.angle) * (bot.speed * speedMultiplier) * dt;
+            this.resolveCollision(bot);
+            return;
+          }
+        }
+
+        // Fallback: steer directly toward destination
+        bot.targetAngle = Math.atan2(targetY - bot.y, targetX - bot.x);
+        bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 7 * dt);
+        bot.x += Math.cos(bot.angle) * (bot.speed * speedMultiplier) * dt;
+        bot.y += Math.sin(bot.angle) * (bot.speed * speedMultiplier) * dt;
+        this.resolveCollision(bot);
+      }
+
       updateBots(dt) {
         if (!this.player || this.roundState !== 'ACTIVE') return;
 
         // Check if C4 is planted or dropped on ground
         const isC4Planted = !!(this.c4 && this.c4.planted && !this.c4.defused);
         const droppedC4 = this.droppedItems.find(it => it.type === 'c4');
+
+        // Team shared enemy intel: if any CT spots a T, or any noise ping occurs, share across team
+        let sharedEnemyIntel = null;
+        for (const b of this.bots) {
+          if (b.hp > 0 && b.team === 'Team_Alpha' && b.lastKnownEnemyPos) {
+            sharedEnemyIntel = b.lastKnownEnemyPos;
+            break;
+          }
+        }
+        if (!sharedEnemyIntel && this.player && this.player.hp > 0 && this.isAimingAtEnemy) {
+          const enemy = this.bots.find(b => b.team === 'Team_Bravo' && b.hp > 0 && this.hasLoS(this.player.x, this.player.y, b.x, b.y));
+          if (enemy) sharedEnemyIntel = { x: enemy.x, y: enemy.y };
+        }
+        if (!sharedEnemyIntel && this.noisePings.length > 0) {
+          const latestPing = this.noisePings[this.noisePings.length - 1];
+          if (latestPing.team === 'Team_Bravo') sharedEnemyIntel = { x: latestPing.x, y: latestPing.y };
+        }
 
         // Determine designated defuser among CT bots
         let designatedDefuser = null;
@@ -2106,15 +2261,15 @@
           }
 
           // =========================================================================
-          // 2. COUNTER-TERRORIST (CT) TACTICAL INTELLIGENCE
+          // 2. COUNTER-TERRORIST (CT) TACTICAL INTELLIGENCE: HUNT TERRORISTS & DEFUSE C4
           // =========================================================================
           if (bot.team === 'Team_Alpha') {
             if (isC4Planted) {
-              // C4 DEFUSE & RETAKE OVERRIDE
+              // PRIORITY 1: C4 IS PLANTED -> RETAKE AND DEFUSE IMMEDIATELY
               if (bot === designatedDefuser) {
                 const dToBomb = Math.hypot(this.c4.x - bot.x, this.c4.y - bot.y);
-                // Clear immediate direct threats before committing or if being shot
-                if (dToBomb < 42) {
+                if (dToBomb < 46) {
+                  // Reached bomb: begin / maintain defuse
                   bot.isDefusing = true;
                   bot.targetAngle = Math.atan2(this.c4.y - bot.y, this.c4.x - bot.x);
                   bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 10 * dt);
@@ -2125,91 +2280,80 @@
                     this.endRound('CT', `${bot.name} successfully defused the C4 bomb!`);
                     return;
                   }
-                  continue; // Stay defusing
+                  continue; // Remain locked on defuse
                 } else {
                   bot.isDefusing = false;
-                  // Rush directly toward planted C4
-                  bot.targetAngle = Math.atan2(this.c4.y - bot.y, this.c4.x - bot.x);
-                  bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 8 * dt);
-                  bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                  bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                  this.resolveCollision(bot);
+                  // Sprint directly toward planted C4
+                  this.steerBotTowards(bot, this.c4.x, this.c4.y, dt, 1.05);
                   continue;
                 }
               } else {
-                // CT SUPPORT BOTS: Retake site and set up defensive crossfire around defusing teammate
+                // CT SUPPORT RETAKE: Push to bomb site to eliminate T campers and defend the defuser
                 bot.isDefusing = false;
                 const dToBomb = Math.hypot(this.c4.x - bot.x, this.c4.y - bot.y);
 
-                if (dToBomb > 180) {
-                  // Coordinate push toward the planted site (Mid / B Tunnels / Catwalk)
-                  if (!bot.retakeInitialized) {
-                    bot.retakeInitialized = true;
-                    if (this.c4.site === 'B') {
-                      bot.route = ['top_mid', 'b_doors', 'b_site'];
-                      bot.routeIndex = 0;
-                    } else {
-                      bot.route = ['ct_spawn', 'short_a', 'a_site'];
-                      bot.routeIndex = 0;
-                    }
-                  }
-                  // Follow retake route
-                  if (bot.route && bot.routeIndex < bot.route.length) {
-                    const wpKey = bot.route[bot.routeIndex];
-                    const wp = GameConfig.waypoints[wpKey];
-                    if (wp && Math.hypot(wp.x - bot.x, wp.y - bot.y) < 38) {
-                      bot.routeIndex++;
-                    } else if (wp) {
-                      bot.targetAngle = Math.atan2(wp.y - bot.y, wp.x - bot.x);
-                      bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 7 * dt);
-                      bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                      bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                      this.resolveCollision(bot);
-                    }
-                  } else {
-                    bot.targetAngle = Math.atan2(this.c4.y - bot.y, this.c4.x - bot.x);
-                    bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 7 * dt);
-                    bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                    bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                    this.resolveCollision(bot);
-                  }
+                if (closestEnemy) {
+                  // Direct sightline to an enemy at the site: engage and eliminate
+                  bot.state = (closestDist <= 440) ? 'Shoot' : 'Chase';
+                } else if (dToBomb > 140) {
+                  // Sprint aggressively to bomb site
+                  this.steerBotTowards(bot, this.c4.x, this.c4.y, dt, 1.0);
+                  continue;
                 } else {
-                  // Position defensive crossfire perimeter facing entrances
-                  const guardAngle = (bIdx * 1.57);
-                  const guardX = this.c4.x + Math.cos(guardAngle) * 90;
-                  const guardY = this.c4.y + Math.sin(guardAngle) * 90;
-                  const dToGuard = Math.hypot(guardX - bot.x, guardY - bot.y);
-                  if (dToGuard > 24) {
-                    bot.targetAngle = Math.atan2(guardY - bot.y, guardX - bot.x);
-                    bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
-                    bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                    bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                    this.resolveCollision(bot);
-                  } else {
-                    // Watch chokepoints outward from bomb
-                    bot.targetAngle = Math.atan2(bot.y - this.c4.y, bot.x - this.c4.x);
-                    // Active sweeping for hostiles
-                    bot.scanTimer -= dt;
-                    if (bot.scanTimer <= 0) {
-                      bot.scanTimer = 0.8 + Math.random() * 0.9;
-                      bot.scanOffset = (Math.random() - 0.5) * 1.1;
-                    }
-                    bot.angle = this.smoothRot(bot.angle, bot.targetAngle + bot.scanOffset, 4 * dt);
+                  // Inside bomb site: Clear out site corners and hold crossfire guarding the defuser
+                  bot.targetAngle = Math.atan2(bot.y - this.c4.y, bot.x - this.c4.x);
+                  bot.scanTimer -= dt;
+                  if (bot.scanTimer <= 0) {
+                    bot.scanTimer = 0.6 + Math.random() * 0.7;
+                    bot.scanOffset = (Math.random() - 0.5) * 1.4;
                   }
+                  bot.angle = this.smoothRot(bot.angle, bot.targetAngle + bot.scanOffset, 5 * dt);
                 }
               }
             } else {
-              // Pre-plant Active Scanning while patrolling or moving
-              bot.scanTimer -= dt;
-              if (bot.scanTimer <= 0) {
-                bot.scanTimer = 0.7 + Math.random() * 0.8;
-                bot.scanOffset = (Math.random() - 0.5) * 1.2; // Left-right tactical sweep
+              // PRIORITY 2: PRE-PLANT -> ACTIVE OFFENSIVE HUNTING & ADVANCE (DO NOT CAMP!)
+              // If hostile is spotted anywhere by any teammate or noise ping, CTs swarm their location
+              let primaryTargetPos = null;
+              if (closestEnemy) {
+                primaryTargetPos = { x: closestEnemy.x, y: closestEnemy.y };
+              } else if (bot.lastKnownEnemyPos) {
+                primaryTargetPos = bot.lastKnownEnemyPos;
+              } else if (sharedEnemyIntel) {
+                primaryTargetPos = sharedEnemyIntel;
+              } else if (droppedC4) {
+                // Bomb dropped! CTs push to guard/camp the dropped bomb so Ts cannot retrieve it
+                primaryTargetPos = { x: droppedC4.x, y: droppedC4.y };
+              }
+
+              if (primaryTargetPos && !closestEnemy) {
+                const distToIntel = Math.hypot(primaryTargetPos.x - bot.x, primaryTargetPos.y - bot.y);
+                if (distToIntel > 48) {
+                  // Actively hunt down the target position
+                  this.steerBotTowards(bot, primaryTargetPos.x, primaryTargetPos.y, dt, 1.0);
+                  continue;
+                } else {
+                  // Arrived at last known location: clear chokepoint and reset to push deeper
+                  if (bot.lastKnownEnemyPos === primaryTargetPos) bot.lastKnownEnemyPos = null;
+                  bot.scanTimer -= dt;
+                  if (bot.scanTimer <= 0) {
+                    bot.scanTimer = 0.6 + Math.random() * 0.6;
+                    bot.scanOffset = (Math.random() - 0.5) * 1.5;
+                  }
+                  bot.angle = this.smoothRot(bot.angle, bot.angle + bot.scanOffset, 6 * dt);
+                }
+              } else if (!closestEnemy) {
+                // CT Patrol sweep: scan actively around while pushing along routes
+                bot.scanTimer -= dt;
+                if (bot.scanTimer <= 0) {
+                  bot.scanTimer = 0.6 + Math.random() * 0.6;
+                  bot.scanOffset = (Math.random() - 0.5) * 1.3;
+                }
               }
             }
           }
 
           // =========================================================================
-          // 3. TERRORIST (T) TACTICAL INTELLIGENCE
+          // 3. TERRORIST (T) TACTICAL INTELLIGENCE: RUSH SITE, PLANT & CAMP/LOCKDOWN
           // =========================================================================
           if (bot.team === 'Team_Bravo') {
             // A. Dropped C4 Retrieval
@@ -2220,12 +2364,8 @@
                 this.droppedItems = this.droppedItems.filter(it => it !== droppedC4);
                 SoundFx.playDefuseTick();
               } else if (!closestEnemy) {
-                // Highest priority: secure dropped bomb
-                bot.targetAngle = Math.atan2(droppedC4.y - bot.y, droppedC4.x - bot.x);
-                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 7 * dt);
-                bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                this.resolveCollision(bot);
+                // Highest priority: sprint to recover the dropped bomb
+                this.steerBotTowards(bot, droppedC4.x, droppedC4.y, dt, 1.05);
                 continue;
               }
             }
@@ -2236,10 +2376,10 @@
               const targetSite = isSiteB ? GameConfig.sites.B : GameConfig.sites.A;
               const distToSite = Math.hypot(targetSite.x - bot.x, targetSite.y - bot.y);
 
-              if (distToSite < targetSite.radius - 12) {
-                // Enter bomb site: immediately hold position and plant for 3.5 seconds
+              if (distToSite < targetSite.radius - 10) {
+                // In bomb site: stop moving immediately and plant for 3.5 seconds
                 bot.plantingProgress += dt;
-                bot.targetAngle = bot.angle; // Stop and plant
+                bot.targetAngle = bot.angle; // Lock angle
                 if (bot.plantingProgress >= GameConfig.c4PlantTime) {
                   bot.hasC4 = false;
                   this.c4.planted = true;
@@ -2250,38 +2390,62 @@
                   SoundFx.playCash();
                   this.addNoisePing(bot.x, bot.y, 600, 'Team_Bravo');
                 }
+                continue; // Focus on planting
+              } else if (!closestEnemy) {
+                // Rush directly into bomb site
+                this.steerBotTowards(bot, targetSite.x, targetSite.y, dt, 1.02);
                 continue;
               }
             }
 
-            // C. Post-Plant Defense: Disperse into cover with sightline to C4
+            // C. Terrorist Squad Escort: Push toward site with the bomb carrier
+            if (!isC4Planted && !bot.hasC4 && currentC4Carrier && !closestEnemy) {
+              const dToCarrier = Math.hypot(currentC4Carrier.x - bot.x, currentC4Carrier.y - bot.y);
+              if (dToCarrier > 240) {
+                // Catch up and support carrier's advance to bomb site
+                this.steerBotTowards(bot, currentC4Carrier.x, currentC4Carrier.y, dt, 1.0);
+                continue;
+              }
+            }
+
+            // D. POST-PLANT SITE DEFENSE & TACTICAL CAMPING
+            // Once bomb is planted, Terrorists CAMP AT THE SITE and eliminate Counter-Terrorists trying to defuse!
             if (isC4Planted) {
-              if (!bot.postPlantCoverPos) {
-                // Pick a defensive cover spot 80-160px from C4 with LoS to C4
-                const angles = [0.2, 1.2, 2.3, 3.4, 4.5, 5.5];
-                for (const ang of angles) {
-                  const checkX = this.c4.x + Math.cos(ang) * 120;
-                  const checkY = this.c4.y + Math.sin(ang) * 120;
-                  if (!this.isSolid(checkX, checkY) && this.hasLoS(checkX, checkY, this.c4.x, this.c4.y)) {
-                    bot.postPlantCoverPos = { x: checkX, y: checkY };
+              if (!bot.tacticalCampPos) {
+                // Find a prime camping position inside the bomb site with cover and LoS to C4
+                const siteCenter = (this.c4.site === 'B') ? GameConfig.sites.B : GameConfig.sites.A;
+                const campSpots = [
+                  { dx: 65, dy: 65 }, { dx: -70, dy: 60 }, { dx: 60, dy: -65 }, { dx: -65, dy: -65 },
+                  { dx: 95, dy: 0 }, { dx: -95, dy: 0 }, { dx: 0, dy: 90 }, { dx: 0, dy: -90 }
+                ];
+                let chosenSpot = null;
+                for (let k = 0; k < campSpots.length; k++) {
+                  const checkSpot = campSpots[(bIdx + k) % campSpots.length];
+                  const testX = this.c4.x + checkSpot.dx;
+                  const testY = this.c4.y + checkSpot.dy;
+                  if (!this.isSolid(testX, testY) && this.hasLoS(testX, testY, this.c4.x, this.c4.y)) {
+                    chosenSpot = { x: testX, y: testY };
                     break;
                   }
                 }
-                if (!bot.postPlantCoverPos) bot.postPlantCoverPos = { x: this.c4.x + 80, y: this.c4.y };
+                bot.tacticalCampPos = chosenSpot || { x: this.c4.x + ((bIdx % 2 === 0 ? 1 : -1) * 70), y: this.c4.y };
               }
 
-              const dToPostCover = Math.hypot(bot.postPlantCoverPos.x - bot.x, bot.postPlantCoverPos.y - bot.y);
-              if (dToPostCover > 20 && !closestEnemy) {
-                bot.targetAngle = Math.atan2(bot.postPlantCoverPos.y - bot.y, bot.postPlantCoverPos.x - bot.x);
-                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
-                bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                this.resolveCollision(bot);
+              const dToCamp = Math.hypot(bot.tacticalCampPos.x - bot.x, bot.tacticalCampPos.y - bot.y);
+              if (dToCamp > 18 && !closestEnemy) {
+                // Move quickly into the camping spot
+                this.steerBotTowards(bot, bot.tacticalCampPos.x, bot.tacticalCampPos.y, dt, 1.0);
                 continue;
               } else if (!closestEnemy) {
-                // Guard sightline directly at the bomb to deny CT defuses
+                // CAMP AT SITE: Hold position behind crates and aim directly at the C4 or incoming site entrances
                 bot.targetAngle = Math.atan2(this.c4.y - bot.y, this.c4.x - bot.x);
-                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 5 * dt);
+                bot.scanTimer -= dt;
+                if (bot.scanTimer <= 0) {
+                  bot.scanTimer = 0.9 + Math.random() * 0.9;
+                  bot.scanOffset = (Math.random() - 0.5) * 0.7; // Focused crosshair on bomb
+                }
+                bot.angle = this.smoothRot(bot.angle, bot.targetAngle + bot.scanOffset, 6 * dt);
+                continue; // Strictly CAMP at the site!
               }
             }
           }
@@ -2361,11 +2525,7 @@
           } else if (bot.state === 'Chase') {
             const dest = bot.lastKnownEnemyPos || closestEnemy;
             if (dest) {
-              bot.targetAngle = Math.atan2(dest.y - bot.y, dest.x - bot.x);
-              bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
-              bot.x += Math.cos(bot.angle) * bot.speed * dt;
-              bot.y += Math.sin(bot.angle) * bot.speed * dt;
-              this.resolveCollision(bot);
+              this.steerBotTowards(bot, dest.x, dest.y, dt, 1.05);
             }
           } else {
             // Radio Orders priority for friendly CT bots
@@ -2390,11 +2550,7 @@
               }
 
               if (needMove) {
-                bot.targetAngle = Math.atan2(ty - bot.y, tx - bot.x);
-                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 6 * dt);
-                bot.x += Math.cos(bot.angle) * bot.speed * dt;
-                bot.y += Math.sin(bot.angle) * bot.speed * dt;
-                this.resolveCollision(bot);
+                this.steerBotTowards(bot, tx, ty, dt, 1.0);
               } else {
                 bot.angle = this.smoothRot(bot.angle, this.player.angle + (bot.scanOffset || 0), 4 * dt);
               }
@@ -2405,42 +2561,59 @@
                 const wp = GameConfig.waypoints[wpKey];
                 if (wp) {
                   const distToWp = Math.hypot(wp.x - bot.x, wp.y - bot.y);
-                  if (distToWp < 40) {
+                  if (distToWp < 36) {
                     bot.routeIndex++;
                   } else {
-                    bot.targetAngle = Math.atan2(wp.y - bot.y, wp.x - bot.x);
-                    bot.angle = this.smoothRot(bot.angle, bot.targetAngle + (bot.scanOffset || 0) * 0.4, 6 * dt);
-                    bot.x += Math.cos(bot.targetAngle) * bot.speed * dt;
-                    bot.y += Math.sin(bot.targetAngle) * bot.speed * dt;
-                    this.resolveCollision(bot);
+                    this.steerBotTowards(bot, wp.x, wp.y, dt, 0.95);
                   }
                 } else {
                   bot.routeIndex++;
                 }
               } else {
-                // Reached destination zone: Guard choke angle with active scanning sweep
-                bot.stateTimer -= dt;
-                if (bot.stateTimer <= 0) {
-                  bot.stateTimer = 1.8 + Math.random() * 2;
-                  const sweep = (Math.random() - 0.5) * 1.2;
-                  bot.targetAngle = bot.angle + sweep;
+                // Reached end of initial route:
+                if (bot.team === 'Team_Alpha') {
+                  // CT Bots: Do NOT sit still! Cycle between tactical hotspots (Long A, Mid Doors, B Site, T Spawn)
+                  const attackHotspots = ['t_mid', 'long_doors', 'b_tunnels', 't_spawn', 'mid_doors'];
+                  const nextTarget = attackHotspots[Math.floor(Math.random() * attackHotspots.length)];
+                  const nextWp = GameConfig.waypoints[nextTarget];
+                  if (nextWp) {
+                    bot.route = [nextTarget];
+                    bot.routeIndex = 0;
+                  }
+                } else {
+                  // T Bots: If bomb not planted, advance toward the closest bomb site to escort carrier
+                  if (!isC4Planted) {
+                    const nearestSite = (Math.hypot(bot.x - GameConfig.sites.A.x, bot.y - GameConfig.sites.A.y) < Math.hypot(bot.x - GameConfig.sites.B.x, bot.y - GameConfig.sites.B.y)) ? GameConfig.sites.A : GameConfig.sites.B;
+                    this.steerBotTowards(bot, nearestSite.x, nearestSite.y, dt, 0.95);
+                  } else {
+                    // C4 planted: hold tight camping angle
+                    bot.targetAngle = Math.atan2(this.c4.y - bot.y, this.c4.x - bot.x);
+                    bot.angle = this.smoothRot(bot.angle, bot.targetAngle + (bot.scanOffset || 0), 4 * dt);
+                  }
                 }
-                bot.angle = this.smoothRot(bot.angle, bot.targetAngle + (bot.scanOffset || 0), 3 * dt);
               }
             } else {
-              bot.stateTimer -= dt;
-              if (bot.stateTimer <= 0) {
-                bot.stateTimer = 1.5 + Math.random() * 2;
-                const a = Math.random() * Math.PI * 2;
-                bot.patrolDir = { x: Math.cos(a), y: Math.sin(a) };
+              // General Roaming / Hunting
+              if (bot.team === 'Team_Alpha') {
+                // CT bots push aggressively toward enemy territory or bomb sites
+                const roamTargets = [GameConfig.sites.A, GameConfig.sites.B, GameConfig.waypoints.t_mid, GameConfig.waypoints.long_doors];
+                const rt = roamTargets[bIdx % roamTargets.length];
+                this.steerBotTowards(bot, rt.x, rt.y, dt, 0.9);
+              } else {
+                bot.stateTimer -= dt;
+                if (bot.stateTimer <= 0) {
+                  bot.stateTimer = 1.5 + Math.random() * 2;
+                  const a = Math.random() * Math.PI * 2;
+                  bot.patrolDir = { x: Math.cos(a), y: Math.sin(a) };
+                }
+                bot.targetAngle = Math.atan2(bot.patrolDir.y, bot.patrolDir.x);
+                bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 4 * dt);
+                const nx = bot.x + bot.patrolDir.x * (bot.speed * 0.65) * dt;
+                const ny = bot.y + bot.patrolDir.y * (bot.speed * 0.65) * dt;
+                if (this.isSolid(nx + bot.patrolDir.x * 20, ny + bot.patrolDir.y * 20)) bot.stateTimer = 0;
+                else { bot.x = nx; bot.y = ny; }
+                this.resolveCollision(bot);
               }
-              bot.targetAngle = Math.atan2(bot.patrolDir.y, bot.patrolDir.x);
-              bot.angle = this.smoothRot(bot.angle, bot.targetAngle, 4 * dt);
-              const nx = bot.x + bot.patrolDir.x * (bot.speed * 0.65) * dt;
-              const ny = bot.y + bot.patrolDir.y * (bot.speed * 0.65) * dt;
-              if (this.isSolid(nx + bot.patrolDir.x * 20, ny + bot.patrolDir.y * 20)) bot.stateTimer = 0;
-              else { bot.x = nx; bot.y = ny; }
-              this.resolveCollision(bot);
             }
           }
         }
@@ -2955,6 +3128,9 @@
             } else if (bot.isReloading) {
               ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
               ctx.fillText('RELOADING', bot.x, bot.y - 38);
+            } else if (this.c4 && this.c4.planted) {
+              ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+              ctx.fillText('RETAKING SITE', bot.x, bot.y - 36);
             }
           } else {
             // Hostile Health Bar (Red)
@@ -2962,10 +3138,13 @@
             ctx.fillStyle = '#ef4444'; ctx.fillRect(bot.x - 14, bot.y - 26, 28 * Math.max(0, bot.hp / bot.maxHp), 4);
             if (bot.hasC4) {
               ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-              ctx.fillStyle = '#fbbf24'; ctx.fillText('C4 CARRIER', bot.x, bot.y - 31);
+              ctx.fillStyle = '#fbbf24'; ctx.fillText(bot.plantingProgress > 0 ? 'PLANTING C4...' : 'C4 CARRIER', bot.x, bot.y - 31);
             } else if (bot.isReloading) {
               ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
               ctx.fillStyle = '#fbbf24'; ctx.fillText('RELOADING', bot.x, bot.y - 31);
+            } else if (this.c4 && this.c4.planted && bot.tacticalCampPos) {
+              ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+              ctx.fillStyle = '#ef4444'; ctx.fillText('DEFENDING SITE', bot.x, bot.y - 31);
             }
           }
         }
