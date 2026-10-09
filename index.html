@@ -1458,12 +1458,13 @@
           ['t_spawn', 't_mid', 'mid_doors', 'top_mid', 'b_doors', 'b_site']  // 5. Mid to B Split
         ];
 
-        // Counter-Terrorists Tactical Offensive / Hunting Routes (Pushing actively into lanes instead of camping)
+        // Counter-Terrorists Tactical Routes: Defenders anchor Site A and Site B, with rotators covering Mid/Chokes
         const ctDefenseRoutes = [
-          ['ct_spawn', 'a_site', 'long_a', 'long_doors', 'long_t'],     // Attack Long A & Push to T-Side
-          ['ct_spawn', 'short_a', 'catwalk', 'mid_doors', 't_mid'],      // Push Short A through Catwalk to T-Mid
-          ['ct_spawn', 'top_mid', 'mid_doors', 't_mid', 't_spawn'],      // Aggressive Mid Push to T Spawn
-          ['ct_spawn', 'b_doors', 'b_site', 'b_tunnels', 'outside_tunnels'] // Clear B Site & Push into B Tunnels
+          ['ct_spawn', 'short_a', 'a_site'],     // Anchor Site A (Short)
+          ['ct_spawn', 'long_a', 'a_site'],      // Anchor Site A (Long)
+          ['ct_spawn', 'b_doors', 'b_site'],     // Anchor Site B (Doors)
+          ['ct_spawn', 'top_mid', 'b_site'],     // Anchor Site B (Mid approach)
+          ['ct_spawn', 'top_mid', 'mid_doors']   // Mid Choke Defender / Rotator
         ];
 
         // 1. Spawn Friendly CT Bots around CT Spawn
@@ -1478,9 +1479,12 @@
           const bKey = profile.primary || profile.secondary;
           const bStats = GameConfig.weapons[bKey];
           const assignedRoute = ctDefenseRoutes[i % ctDefenseRoutes.length].slice();
+          // CT bots prioritize 'Defender' role anchoring bomb sites
+          const assignedSite = (i % 2 === 0) ? 'A' : 'B';
 
           this.bots.push({
             id: profile.id, name: profile.name, team: 'Team_Alpha', profile: profile,
+            tacticalRole: 'Defender', anchorSite: assignedSite,
             x: spawnX, y: spawnY, radius: 17, hp: 100, maxHp: 100,
             angle: 0, targetAngle: 0, speed: GameConfig.botSpeed,
             state: 'Patrol', stateTimer: 1.5, patrolDir: { x: 1, y: 0 },
@@ -1512,9 +1516,13 @@
           const bKey = profile.primary || profile.secondary;
           const bStats = GameConfig.weapons[bKey];
           const assignedRoute = tRoutes[i % tRoutes.length].slice();
+          const isCarrier = (i === c4EnemyIndex);
+          // Initial role: C4 carrier or lead bots start as 'Rusher', others as 'Support'
+          const initialTRole = isCarrier ? 'Rusher' : ((i % 2 === 0) ? 'Rusher' : 'Support');
 
           this.bots.push({
             id: profile.id, name: profile.name, team: 'Team_Bravo', profile: profile,
+            tacticalRole: initialTRole, anchorSite: null,
             x: spawnX, y: spawnY, radius: 17, hp: 100, maxHp: 100,
             angle: -Math.PI / 2, targetAngle: -Math.PI / 2, speed: GameConfig.botSpeed,
             state: 'Patrol', stateTimer: 1.5, patrolDir: { x: 0, y: -1 },
@@ -1525,7 +1533,7 @@
             equippedWeapon: bKey, weaponStats: { ...bStats }, currentAmmo: bStats.magSize,
             isReloading: false, reloadTimer: 0,
             lastShotTime: 0, shootInaccuracy: 0.10,
-            hasC4: (i === c4EnemyIndex), plantingProgress: 0, isDefusing: false, defuseProgress: 0,
+            hasC4: isCarrier, plantingProgress: 0, isDefusing: false, defuseProgress: 0,
             hasDefuseKit: false, flashTimer: 0,
             strafeDir: (Math.random() < 0.5 ? 1 : -1), strafeTimer: 0.5 + Math.random() * 0.5,
             scanTimer: 0.8 + Math.random() * 0.8, scanOffset: 0, scanBaseAngle: -Math.PI / 2,
@@ -2233,6 +2241,21 @@
             bot.targetEnemy = null;
           }
 
+          // Dynamic Tactical Role Rotation for Terrorists based on Route Progress
+          if (bot.team === 'Team_Bravo' && !isC4Planted) {
+            if (bot.hasC4) {
+              bot.tacticalRole = 'Rusher'; // C4 carrier always leads execution
+            } else if (bot.route && bot.route.length > 0) {
+              // Rotate between 'Rusher' (entry fragger pushing ahead) and 'Support' (covering angles / refrag)
+              // Early route phase (routeIndex <= 1): entry bots rush, support bots hold back slightly
+              // Mid route phase: rotation swaps to leapfrog / clear sightlines
+              // Near site (routeIndex >= route.length - 2): rushers execute site, support holds flank chokepoints
+              const isEvenIndex = (bot.routeIndex % 2 === 0);
+              const baseOffset = (bIdx % 2 === 0);
+              bot.tacticalRole = (isEvenIndex === baseOffset) ? 'Rusher' : 'Support';
+            }
+          }
+
           // Tactical Reload & Low Health Retreat Check (Ammo empty or HP < 25%)
           const needsReload = (bot.currentAmmo <= 0 || bot.isReloading);
           const isCriticalHp = (bot.hp < 25);
@@ -2311,28 +2334,28 @@
                 }
               }
             } else {
-              // PRIORITY 2: PRE-PLANT -> ACTIVE OFFENSIVE HUNTING & ADVANCE (DO NOT CAMP!)
-              // If hostile is spotted anywhere by any teammate or noise ping, CTs swarm their location
+              // PRIORITY 2: PRE-PLANT -> DEFENDER SITE ANCHORING & TACTICAL RESPONSE
               let primaryTargetPos = null;
               if (closestEnemy) {
                 primaryTargetPos = { x: closestEnemy.x, y: closestEnemy.y };
               } else if (bot.lastKnownEnemyPos) {
                 primaryTargetPos = bot.lastKnownEnemyPos;
               } else if (sharedEnemyIntel) {
+                // If enemy intel is reported near Defender's site, respond immediately
                 primaryTargetPos = sharedEnemyIntel;
               } else if (droppedC4) {
-                // Bomb dropped! CTs push to guard/camp the dropped bomb so Ts cannot retrieve it
+                // Bomb dropped! CTs secure and anchor the dropped bomb zone
                 primaryTargetPos = { x: droppedC4.x, y: droppedC4.y };
               }
 
               if (primaryTargetPos && !closestEnemy) {
                 const distToIntel = Math.hypot(primaryTargetPos.x - bot.x, primaryTargetPos.y - bot.y);
                 if (distToIntel > 48) {
-                  // Actively hunt down the target position
+                  // Move toward intel position
                   this.steerBotTowards(bot, primaryTargetPos.x, primaryTargetPos.y, dt, 1.0);
                   continue;
                 } else {
-                  // Arrived at last known location: clear chokepoint and reset to push deeper
+                  // Arrived at location: sweep sightlines
                   if (bot.lastKnownEnemyPos === primaryTargetPos) bot.lastKnownEnemyPos = null;
                   bot.scanTimer -= dt;
                   if (bot.scanTimer <= 0) {
@@ -2342,11 +2365,31 @@
                   bot.angle = this.smoothRot(bot.angle, bot.angle + bot.scanOffset, 6 * dt);
                 }
               } else if (!closestEnemy) {
-                // CT Patrol sweep: scan actively around while pushing along routes
-                bot.scanTimer -= dt;
-                if (bot.scanTimer <= 0) {
-                  bot.scanTimer = 0.6 + Math.random() * 0.6;
-                  bot.scanOffset = (Math.random() - 0.5) * 1.3;
+                // CT DEFENDER: Anchor assigned bomb site (Site A or Site B)
+                if (bot.tacticalRole === 'Defender' && bot.anchorSite) {
+                  const targetSite = (bot.anchorSite === 'B') ? GameConfig.sites.B : GameConfig.sites.A;
+                  const distToAnchor = Math.hypot(targetSite.x - bot.x, targetSite.y - bot.y);
+                  if (distToAnchor > targetSite.radius * 0.8) {
+                    // Navigate to anchor position at site
+                    this.steerBotTowards(bot, targetSite.x, targetSite.y, dt, 0.95);
+                    continue;
+                  } else {
+                    // Holding position inside anchored bomb site: scan entry chokepoints
+                    bot.scanTimer -= dt;
+                    if (bot.scanTimer <= 0) {
+                      bot.scanTimer = 0.8 + Math.random() * 0.8;
+                      bot.scanOffset = (Math.random() - 0.5) * 1.6;
+                    }
+                    bot.angle = this.smoothRot(bot.angle, bot.angle + bot.scanOffset, 4 * dt);
+                    continue;
+                  }
+                } else {
+                  // CT Patrol sweep: scan actively around while pushing along routes
+                  bot.scanTimer -= dt;
+                  if (bot.scanTimer <= 0) {
+                    bot.scanTimer = 0.6 + Math.random() * 0.6;
+                    bot.scanOffset = (Math.random() - 0.5) * 1.3;
+                  }
                 }
               }
             }
@@ -2564,7 +2607,21 @@
                   if (distToWp < 36) {
                     bot.routeIndex++;
                   } else {
-                    this.steerBotTowards(bot, wp.x, wp.y, dt, 0.95);
+                    // Differentiate behavior based on tacticalRole:
+                    // 'Rusher' pushes full speed (1.02x) leading the lane entry
+                    // 'Support' advances methodically (0.88x) keeping trailing spacing and covering flanks
+                    const moveSpeed = (bot.tacticalRole === 'Rusher') ? 1.02 : ((bot.tacticalRole === 'Support') ? 0.88 : 0.95);
+                    this.steerBotTowards(bot, wp.x, wp.y, dt, moveSpeed);
+
+                    if (bot.tacticalRole === 'Support') {
+                      // Support bots periodically scan backwards/flanks to prevent backstabs
+                      bot.scanTimer -= dt;
+                      if (bot.scanTimer <= 0) {
+                        bot.scanTimer = 0.5 + Math.random() * 0.5;
+                        bot.scanOffset = (Math.random() < 0.4) ? Math.PI * 0.8 * (Math.random() < 0.5 ? 1 : -1) : (Math.random() - 0.5) * 0.9;
+                      }
+                      bot.angle = this.smoothRot(bot.angle, bot.targetAngle + bot.scanOffset, 5 * dt);
+                    }
                   }
                 } else {
                   bot.routeIndex++;
@@ -3131,6 +3188,9 @@
             } else if (this.c4 && this.c4.planted) {
               ctx.fillStyle = '#38bdf8'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
               ctx.fillText('RETAKING SITE', bot.x, bot.y - 36);
+            } else if (bot.tacticalRole === 'Defender') {
+              ctx.fillStyle = '#34d399'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+              ctx.fillText(`DEFENDER [${bot.anchorSite || 'SITE'}]`, bot.x, bot.y - 36);
             }
           } else {
             // Hostile Health Bar (Red)
@@ -3145,6 +3205,10 @@
             } else if (this.c4 && this.c4.planted && bot.tacticalCampPos) {
               ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
               ctx.fillStyle = '#ef4444'; ctx.fillText('DEFENDING SITE', bot.x, bot.y - 31);
+            } else if (bot.tacticalRole) {
+              ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+              ctx.fillStyle = (bot.tacticalRole === 'Rusher') ? '#f97316' : '#a855f7';
+              ctx.fillText(bot.tacticalRole.toUpperCase(), bot.x, bot.y - 31);
             }
           }
         }
