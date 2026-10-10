@@ -629,6 +629,13 @@
         else this.playTone(340, 'sine', 0.09, 0.2, 70);
       },
       playHit(armor) { this.playTone(armor ? 280 : 100, armor ? 'triangle' : 'square', 0.08, 0.18, 20); },
+      playHitMarker(isFatal) {
+        if (isFatal) {
+          this.playTone(950, 'square', 0.12, 0.22, 1200);
+        } else {
+          this.playTone(850, 'triangle', 0.05, 0.16, 920);
+        }
+      },
       playCash() { this.playTone(700, 'sine', 0.18, 0.15, 880); },
       playExplosion() { this.playTone(90, 'sawtooth', 0.6, 0.45, 15); },
       playBeep() { this.playTone(880, 'sine', 0.06, 0.18); },
@@ -708,6 +715,8 @@
         this.smokeClouds = []; this.noisePings = []; this.c4 = null;
         this.playerFlashAlpha = 0; this.actionProgress = 0; this.actionType = null;
         this.stepTimer = 0;
+        this.hitMarker = { timer: 0, maxDuration: 0.28, isFatal: false, damage: 0, isArmor: false, color: '#ffffff', size: 8 };
+        this.floatingDamageNumbers = [];
 
         // Level Editor State
         this.gameMode = 'PLAY'; // 'PLAY' or 'EDITOR'
@@ -1415,6 +1424,8 @@
 
         this.bullets = []; this.particles = []; this.wallImpacts = [];
         this.activeGrenades = []; this.smokeClouds = []; this.noisePings = [];
+        this.hitMarker = { timer: 0, maxDuration: 0.28, isFatal: false, damage: 0, isArmor: false, color: '#ffffff', size: 8 };
+        this.floatingDamageNumbers = [];
         this.playerProfile.roundKills = 0; this.playerProfile.roundKillEarnings = 0;
         this.actionProgress = 0; this.actionType = null;
 
@@ -1954,6 +1965,70 @@
         }
         target.hp -= dmg;
         return dmg;
+      }
+
+      /* =========================================================================
+         VISUAL HIT MARKERS ON CROSSHAIR
+         ========================================================================= */
+      triggerHitMarker(isFatal = false, damage = 30, isArmor = false) {
+        const duration = isFatal ? 0.42 : 0.26;
+
+        // Size changes:
+        // Shotgun pellet / 9mm: 7 - 8px
+        // Standard Pistol / Rifle: 9 - 11px
+        // Heavy Rifle / Sniper / Deagle (>= 70): 12 - 14px
+        // Fatal Kill: 16 - 18px
+        let baseSize = 8;
+        if (damage >= 80) baseSize = 13;
+        else if (damage >= 45) baseSize = 11;
+        else if (damage >= 25) baseSize = 9;
+        else baseSize = 7;
+
+        if (isFatal) {
+          baseSize = Math.max(baseSize + 5, 16);
+        }
+
+        // Color changes:
+        // Fatal Kill: Crimson Red (#ef4444)
+        // High Damage (>= 70): Blaze Orange (#f97316)
+        // Armor Hit: Electric Cyan (#38bdf8)
+        // Standard Flesh Hit: Bright White / Light Gold (#ffffff / #fef08a)
+        let markerColor = '#ffffff';
+        if (isFatal) {
+          markerColor = '#ef4444';
+        } else if (damage >= 70) {
+          markerColor = '#f97316';
+        } else if (isArmor) {
+          markerColor = '#38bdf8';
+        } else {
+          markerColor = '#fef08a';
+        }
+
+        this.hitMarker = {
+          timer: duration,
+          maxDuration: duration,
+          isFatal: isFatal,
+          damage: Math.round(damage),
+          isArmor: isArmor,
+          color: markerColor,
+          size: baseSize
+        };
+
+        if (!this.floatingDamageNumbers) this.floatingDamageNumbers = [];
+        this.floatingDamageNumbers.push({
+          x: this.mouse.screenX + (Math.random() - 0.5) * 16,
+          y: this.mouse.screenY - 14,
+          vy: -32,
+          text: isFatal ? `KILL -${Math.round(damage)}` : `-${Math.round(damage)}`,
+          color: markerColor,
+          isFatal: isFatal,
+          life: isFatal ? 0.55 : 0.4,
+          maxLife: isFatal ? 0.55 : 0.4
+        });
+
+        if (SoundFx.playHitMarker) {
+          SoundFx.playHitMarker(isFatal);
+        }
       }
 
       /* =========================================================================
@@ -2933,12 +3008,21 @@
 
               b.hitEntities.push(ent.id);
 
+              const hadArmor = prof && prof.armor > 0;
               // Apply damage factoring in armor/helmet
-              this.applyDamage(ent, b.damage, prof);
+              const actualDamage = this.applyDamage(ent, b.damage, prof);
 
               // Impact particles: blood splash for organic hit
               const bloodColor = (b.team === 'Team_Alpha') ? '#ef4444' : '#38bdf8';
               this.spawnSparks(hitInfo.hitX, hitInfo.hitY, bloodColor, 7);
+
+              const isFatal = ent.hp <= 0;
+
+              // Visual Hit Marker on Crosshair when bullet hits enemy entity
+              const aliveSpectated = (this.player && this.player.hp <= 0) ? this.bots.find(sb => sb.team === 'Team_Alpha' && sb.hp > 0) : null;
+              if (b.shooterId === 'player' || (aliveSpectated && b.shooterId === aliveSpectated.id)) {
+                this.triggerHitMarker(isFatal, actualDamage, hadArmor);
+              }
 
               if (cand.isPlayer) {
                 this.updateHUD();
@@ -3010,6 +3094,22 @@
           const p = this.particles[i];
           p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; p.alpha = Math.max(0, p.life * 4);
           if (p.life <= 0) this.particles.splice(i, 1);
+        }
+
+        // 11. Update Visual Hit Marker & Floating Combat Indicators
+        if (this.hitMarker && this.hitMarker.timer > 0) {
+          this.hitMarker.timer = Math.max(0, this.hitMarker.timer - dt);
+        }
+        if (this.floatingDamageNumbers && this.floatingDamageNumbers.length > 0) {
+          for (let i = this.floatingDamageNumbers.length - 1; i >= 0; i--) {
+            const f = this.floatingDamageNumbers[i];
+            f.life -= dt;
+            f.y += f.vy * dt;
+            f.vy *= 0.93;
+            if (f.life <= 0) {
+              this.floatingDamageNumbers.splice(i, 1);
+            }
+          }
         }
 
         this.updateHUD();
@@ -3339,11 +3439,32 @@
         const mx = this.mouse.screenX, my = this.mouse.screenY;
         const lockedEnemy = this.isAimingAtEnemy;
         const aimedFriendly = this.isAimingAtFriendly;
-        const spread = this.player ? this.player.recoilAngle * 1.5 : 0, gap = 5 + spread, len = 7;
+        const spread = this.player ? this.player.recoilAngle * 1.5 : 0;
 
+        const hm = this.hitMarker;
+        const isHitActive = hm && hm.timer > 0;
+        const hitProgress = isHitActive ? (hm.timer / hm.maxDuration) : 0; // 1 -> 0
+
+        // Dynamic crosshair size & gap expansion on hit
+        let gap = 5 + spread;
+        let len = 7;
+        if (isHitActive) {
+          const sizeBoost = (hm.size / 8) * (hm.isFatal ? 7.5 : 4.5);
+          gap += hitProgress * sizeBoost;
+          len += hitProgress * (hm.isFatal ? 6.0 : 3.5);
+        }
+
+        // Dynamic crosshair stroke & center color
         let strokeColor = 'rgba(56, 189, 248, 0.85)';
         let centerColor = '#38bdf8';
-        if (lockedEnemy) {
+        let crosshairWidth = (lockedEnemy || aimedFriendly) ? 2.4 : 1.8;
+
+        if (isHitActive) {
+          // Crosshair actively changes color to match hit type (fatal red, heavy orange, armor cyan, standard gold/white)
+          strokeColor = hm.color;
+          centerColor = hm.color;
+          crosshairWidth = (hm.isFatal ? 3.0 : 2.4) * (0.9 + hitProgress * 0.4);
+        } else if (lockedEnemy) {
           strokeColor = '#ef4444';
           centerColor = '#ef4444';
         } else if (aimedFriendly) {
@@ -3351,8 +3472,11 @@
           centerColor = '#10b981';
         }
 
+        ctx.save();
+
+        // 1. Standard Reticle Lines (+ shape)
         ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = (lockedEnemy || aimedFriendly) ? 2.4 : 1.8;
+        ctx.lineWidth = crosshairWidth;
         ctx.beginPath();
         ctx.moveTo(mx, my - gap); ctx.lineTo(mx, my - gap - len);
         ctx.moveTo(mx, my + gap); ctx.lineTo(mx, my + gap + len);
@@ -3360,19 +3484,112 @@
         ctx.moveTo(mx + gap, my); ctx.lineTo(mx + gap + len, my);
         ctx.stroke();
 
-        ctx.fillStyle = centerColor;
-        ctx.beginPath(); ctx.arc(mx, my, (lockedEnemy || aimedFriendly) ? 2.5 : 1.8, 0, Math.PI * 2); ctx.fill();
+        // 2. Center Reticle Pip (Enlarges on hit)
+        const dotRadius = isHitActive
+          ? (hm.isFatal ? 3.6 + hitProgress * 1.8 : 2.6 + hitProgress * 1.2)
+          : ((lockedEnemy || aimedFriendly) ? 2.5 : 1.8);
 
-        if (lockedEnemy) {
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; ctx.lineWidth = 1.4;
-          ctx.beginPath(); ctx.arc(mx, my, gap + 9, 0, Math.PI * 2); ctx.stroke();
-        } else if (aimedFriendly) {
-          ctx.strokeStyle = 'rgba(16, 185, 129, 0.7)'; ctx.lineWidth = 1.4;
-          ctx.beginPath(); ctx.arc(mx, my, gap + 9, 0, Math.PI * 2); ctx.stroke();
-          ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-          ctx.fillStyle = '#34d399';
-          ctx.fillText(`TEAMMATE (${this.aimedFriendlyName || 'CT'})`, mx, my + gap + 20);
+        ctx.fillStyle = centerColor;
+        ctx.beginPath(); ctx.arc(mx, my, dotRadius, 0, Math.PI * 2); ctx.fill();
+
+        // 3. Aim target lock indicators (when not flashing hit marker)
+        if (!isHitActive) {
+          if (lockedEnemy) {
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; ctx.lineWidth = 1.4;
+            ctx.beginPath(); ctx.arc(mx, my, gap + 9, 0, Math.PI * 2); ctx.stroke();
+          } else if (aimedFriendly) {
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.7)'; ctx.lineWidth = 1.4;
+            ctx.beginPath(); ctx.arc(mx, my, gap + 9, 0, Math.PI * 2); ctx.stroke();
+            ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = '#34d399';
+            ctx.fillText(`TEAMMATE (${this.aimedFriendlyName || 'CT'})`, mx, my + gap + 20);
+          }
         }
+
+        // =========================================================================
+        // 4. VISUAL HIT MARKERS ON CROSSHAIR (Diagonal 'X' Ticks & Hit Effects)
+        // =========================================================================
+        if (isHitActive) {
+          ctx.save();
+          const markerAlpha = Math.max(0, Math.min(1, hitProgress * 1.3));
+          ctx.globalAlpha = markerAlpha;
+          ctx.strokeStyle = hm.color;
+          ctx.lineWidth = (hm.isFatal ? 3.0 : 2.2) * (0.85 + hitProgress * 0.35);
+          ctx.lineCap = 'round';
+
+          // Distance from center and tick length scale dynamically with damage and fatality
+          const diagOffset = (hm.isFatal ? 6 : 4.5) + (1 - hitProgress) * 2;
+          const tickLength = hm.size * (0.8 + hitProgress * 0.45);
+
+          // 4 Diagonal 'X' Hit Marker Ticks:
+          // Top-Left, Top-Right, Bottom-Left, Bottom-Right
+          const diagonals = [
+            [-1, -1],
+            [1, -1],
+            [-1, 1],
+            [1, 1]
+          ];
+
+          ctx.beginPath();
+          for (const [dx, dy] of diagonals) {
+            const x1 = mx + dx * diagOffset;
+            const y1 = my + dy * diagOffset;
+            const x2 = mx + dx * (diagOffset + tickLength);
+            const y2 = my + dy * (diagOffset + tickLength);
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+          }
+          ctx.stroke();
+
+          // Fatal Kill Marker: Distinctive pulsing red aura & elimination ring
+          if (hm.isFatal) {
+            ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + hitProgress * 0.6})`;
+            ctx.lineWidth = 2.0;
+            ctx.beginPath();
+            ctx.arc(mx, my, (diagOffset + tickLength) * 0.95, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Diamond highlight on center
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 1.4;
+            const dSize = 5 + hitProgress * 3;
+            ctx.beginPath();
+            ctx.moveTo(mx, my - dSize);
+            ctx.lineTo(mx + dSize, my);
+            ctx.lineTo(mx, my + dSize);
+            ctx.lineTo(mx - dSize, my);
+            ctx.closePath();
+            ctx.stroke();
+          } else if (hm.isArmor) {
+            // Armor hit notch ring (cyan spark)
+            ctx.strokeStyle = `rgba(56, 189, 248, ${0.35 + hitProgress * 0.5})`;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.arc(mx, my, diagOffset + tickLength * 0.7, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
+        // 5. Floating Combat Indicators near Crosshair
+        if (this.floatingDamageNumbers && this.floatingDamageNumbers.length > 0) {
+          ctx.save();
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          for (const f of this.floatingDamageNumbers) {
+            const alpha = Math.max(0, Math.min(1, f.life / f.maxLife));
+            ctx.globalAlpha = alpha;
+            ctx.font = f.isFatal ? 'bold 12px monospace' : 'bold 10px monospace';
+            // Black text drop-shadow for sharp readability against any background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.fillText(f.text, f.x + 1, f.y + 1);
+            ctx.fillStyle = f.color;
+            ctx.fillText(f.text, f.x, f.y);
+          }
+          ctx.restore();
+        }
+
+        ctx.restore();
       }
 
       renderRadar() {
